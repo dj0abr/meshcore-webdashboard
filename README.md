@@ -86,6 +86,8 @@ FLUSH PRIVILEGES;
 
 # Software bauen
 
+alles kompilieren:
+
 ``` bash
 make
 ```
