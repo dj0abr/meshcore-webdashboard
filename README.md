@@ -21,6 +21,21 @@ Das Dashboard bietet unter anderem:
 
 ------------------------------------------------------------------------
 
+## Screenshots
+
+<p align="center">
+<img src="doku/pic1.png" width="250">
+<img src="doku/pic2.png" width="250">
+<img src="doku/pic3.png" width="250">
+</p>
+
+<p align="center">
+<img src="doku/pic4.png" width="250">
+<img src="doku/pic5.png" width="250">
+</p>
+
+------------------------------------------------------------------------
+
 # Hardware vorbereiten
 
 1. Öffne auf der MeshCore Webseite den **WebFlasher**.
