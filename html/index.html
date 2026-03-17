@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Meshcore Dashboard</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <script src="i18n.js"></script>
     <link
         href="https://unpkg.com/tabulator-tables@6.3.0/dist/css/tabulator_midnight.min.css"
         rel="stylesheet"
@@ -978,6 +979,7 @@
             display: flex;
             align-items: center;
             gap: 20px;
+            flex: 1;
         }
 
         #discoverButton,
@@ -1001,11 +1003,6 @@
         {
             background: #162033;
             border-color: #4b5563;
-        }
-
-        #discoverButton
-        {
-            margin-left: auto;
         }
 
         .discover-results-list
@@ -1077,6 +1074,43 @@
             animation: spin 0.8s linear infinite;
             vertical-align: middle;
         }
+        .header-language-select
+        {
+            height: 44px;
+            min-width: 72px;
+            padding: 0 36px 0 12px;
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            background: #0b1220;
+            color: var(--text);
+            cursor: pointer;
+            font-size: 14px;
+            line-height: 1;
+            appearance: none;
+            -webkit-appearance: none;
+            -moz-appearance: none;
+            background-image:
+                linear-gradient(45deg, transparent 50%, var(--text) 50%),
+                linear-gradient(135deg, var(--text) 50%, transparent 50%);
+            background-position:
+                calc(100% - 18px) calc(50% - 3px),
+                calc(100% - 12px) calc(50% - 3px);
+            background-size: 6px 6px, 6px 6px;
+            background-repeat: no-repeat;
+        }
+
+        .header-language-select:hover
+        {
+            background-color: #162033;
+            border-color: #4b5563;
+        }
+
+        .header-language-select:focus
+        {
+            outline: none;
+            border-color: var(--accent);
+            box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.2);
+        }
 </style>
 </head>
 <body>
@@ -1085,12 +1119,18 @@
             <div class="header-left">
                 <img src="logo.png" class="header-logo" alt="MeshCore">
                 <div class="header-text">
-                    <div class="page-title" id="pageTitle">MeshCore Web-Dashboard</div>
-                    <div class="page-subtitle">by DJ0ABR</div>
+                    <div class="page-title" id="pageTitle" data-i18n="page.title">MeshCore Web-Dashboard</div>
+                    <div class="page-subtitle" data-i18n="page.subtitle">by DJ0ABR</div>
                 </div>
             </div>
-            <button id="discoverButton" type="button" title="Discover">🔎</button>
-            <button id="settingsButton" type="button" title="Setup">⚙</button>
+
+            <select id="languageSelect" class="header-language-select" aria-label="Language">
+                <option value="de">DE</option>
+                <option value="en">EN</option>
+            </select>
+
+            <button id="discoverButton" type="button" data-i18n-title="discover.title">🔎</button>
+            <button id="settingsButton" type="button" data-i18n-title="setup.title">⚙</button>
         </div>
     </header>
 
@@ -1098,20 +1138,20 @@
         <section class="panel">
             <div class="panel-header">
                 <div>
-                    <h1 class="panel-title">Kontakte/Channels</h1>
-                    <div class="panel-subtitle">sortierbar per Klick auf den Spaltenkopf</div>
+                    <h1 class="panel-title" data-i18n="panel.contacts_channels">Kontakte/Channels</h1>
+                    <div class="panel-subtitle" data-i18n="panel.sort_hint">sortierbar per Klick auf den Spaltenkopf</div>
                 </div>
                 <div id="nodeCount" class="status"></div>
             </div>
 
             <div class="toolbar">
-                <label for="typeFilter">Typ:</label>
+                <label for="typeFilter" data-i18n="toolbar.type">Typ:</label>
                 <select id="typeFilter">
-                    <option value="all">Alle</option>
-                    <option value="chat">Chat</option>
-                    <option value="repeater">Repeater</option>
-                    <option value="room">Room</option>
-                    <option value="sensor">Sensor</option>
+                    <option value="all" data-i18n="toolbar.filter.all">Alle</option>
+                    <option value="chat" data-i18n="toolbar.filter.chat">Chat</option>
+                    <option value="repeater" data-i18n="toolbar.filter.repeater">Repeater</option>
+                    <option value="room" data-i18n="toolbar.filter.room">Room</option>
+                    <option value="sensor" data-i18n="toolbar.filter.sensor">Sensor</option>
                 </select>
 
                 <label class="checkbox-label">
@@ -1119,16 +1159,16 @@
                     Callsign
                 </label>
 
-                <button id="allMapButton" class="toolbar-button" type="button">AllMap</button>
-                <button id="advertButton" class="toolbar-button" type="button">Advert</button>
+                <button id="allMapButton" class="toolbar-button" type="button" data-i18n="toolbar.all_map">AllMap</button>
+                <button id="advertButton" class="toolbar-button" type="button" data-i18n="toolbar.advert">Advert</button>
             </div>
 
             <div class="panel-content">
                 <div id="tableError"></div>
                 <div class="sidebar-section">
                     <div class="sidebar-tabs">
-                        <button id="tabNodesBtn" class="sidebar-tab active" type="button">Contacts</button>
-                        <button id="tabChannelsBtn" class="sidebar-tab" type="button">Channels</button>
+                        <button id="tabNodesBtn" class="sidebar-tab active" type="button" data-i18n="tabs.contacts">Contacts</button>
+                        <button id="tabChannelsBtn" class="sidebar-tab" type="button" data-i18n="tabs.channels">Channels</button>
                     </div>
 
                     <div id="nodesPanel" class="sidebar-panel active">
@@ -1137,11 +1177,11 @@
 
                     <div id="channelsPanel" class="sidebar-panel">
                         <div class="channels-toolbar">
-                            <button id="createPrivateChannelBtn" type="button">Create Private</button>
-                            <button id="joinPrivateChannelBtn" type="button">Join Private</button>
-                            <button id="joinPublicChannelBtn" type="button">Join Public</button>
-                            <button id="joinHashtagChannelBtn" type="button">Join Hashtag</button>
-                            <button id="removeChannelBtn" type="button">Remove</button>
+                            <button id="createPrivateChannelBtn" type="button" data-i18n="channel.button.create_private">Create Private</button>
+                            <button id="joinPrivateChannelBtn" type="button" data-i18n="channel.button.join_private">Join Private</button>
+                            <button id="joinPublicChannelBtn" type="button" data-i18n="channel.button.join_public">Join Public</button>
+                            <button id="joinHashtagChannelBtn" type="button" data-i18n="channel.button.join_hashtag">Join Hashtag</button>
+                            <button id="removeChannelBtn" type="button" data-i18n="channel.button.remove">Remove</button>
                         </div>
 
                         <div id="channelsList" class="channels-list"></div>
@@ -1153,7 +1193,7 @@
         <section class="panel">
             <div class="panel-header">
                 <div>
-                    <h2 class="panel-title">Messages</h2>
+                    <h2 class="panel-title" data-i18n="panel.messages">Messages</h2>
                     <div class="panel-subtitle"></div>
                 </div>
             </div>
@@ -1163,7 +1203,7 @@
 
                 <div id="chatView" class="chat-view" style="display:none;">
                     <div class="chat-view-header">
-                        <strong id="chatTitle">Chat</strong>
+                        <strong id="chatTitle" data-i18n="chat.title.default">Chat</strong>
                     </div>
 
                     <div id="chatBody" class="chat-view-body"></div>
@@ -1174,14 +1214,15 @@
                             class="chat-input"
                             type="text"
                             maxlength="400"
-                            placeholder="Nachricht eingeben und Enter drücken ..."
                             autocomplete="off"
+                            data-i18n-placeholder="chat.input_placeholder"
+                            placeholder="Nachricht eingeben und Enter drücken ..."
                         >
-                        <button id="chatSendButton" class="chat-send-button" type="button">Senden</button>
+                        <button id="chatSendButton" class="chat-send-button" type="button" data-i18n="chat.send">Senden</button>
                     </div>
                 </div>
 
-                <div id="mapEmpty" class="empty-state">
+                <div id="mapEmpty" class="empty-state" data-i18n="map.empty.default">
                     Linksklick auf Chat oder Room = Verlauf, Rechtsklick = Karte.
                 </div>
             </div>
@@ -1192,23 +1233,24 @@
     <div id="roomPasswordModal" class="modal-overlay" aria-hidden="true">
         <div class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="roomPasswordTitle">
             <div class="modal-header">
-                <h3 id="roomPasswordTitle" class="modal-title">Passwort für Room</h3>
+                <h3 id="roomPasswordTitle" class="modal-title" data-i18n="room_password.title">Passwort für Room</h3>
                 <div id="roomPasswordSubtitle" class="modal-subtitle"></div>
             </div>
             <div class="modal-body">
-                <label class="modal-label" for="roomPasswordInput">Room Passwort</label>
+                <label class="modal-label" for="roomPasswordInput" data-i18n="room_password.label">Room Passwort</label>
                 <input
                     id="roomPasswordInput"
                     class="modal-input"
                     type="password"
                     maxlength="64"
                     autocomplete="off"
+                    data-i18n-placeholder="room_password.input_placeholder"
                     placeholder="Passwort eingeben ..."
                 >
                 <div id="roomPasswordError" class="modal-error"></div>
                 <div class="modal-actions">
-                    <button id="roomPasswordCancelButton" class="toolbar-button" type="button">Abbrechen</button>
-                    <button id="roomPasswordSaveButton" class="chat-send-button" type="button">Speichern</button>
+                    <button id="roomPasswordCancelButton" class="toolbar-button" type="button" data-i18n="room_password.cancel">Abbrechen</button>
+                    <button id="roomPasswordSaveButton" class="chat-send-button" type="button" data-i18n="room_password.save">Speichern</button>
                 </div>
             </div>
         </div>
@@ -1217,29 +1259,29 @@
     <div id="channelModal" class="modal-overlay" aria-hidden="true">
         <div class="modal-dialog">
             <div class="modal-header">
-                <h3 id="channelModalTitle">Channel</h3>
+                <h3 id="channelModalTitle" data-i18n="channel.modal.base_title">Kanal</h3>
             </div>
 
             <div class="modal-body">
                 <div id="channelModalSubtitle" class="modal-subtitle"></div>
 
                 <div id="channelNameGroup" class="form-group">
-                    <label for="channelNameInput">Channel name</label>
+                    <label for="channelNameInput" data-i18n="channel.name">Kanalname</label>
                     <input id="channelNameInput" type="text" autocomplete="off">
                 </div>
 
                 <div id="channelSecretGroup" class="form-group">
-                    <label for="channelSecretInput">Secret key</label>
+                    <label for="channelSecretInput" data-i18n="channel.secret">Secret Key</label>
                     <input id="channelSecretInput" type="text" autocomplete="off">
                 </div>
 
                 <div id="channelResultGroup" class="form-group" style="display:none;">
-                    <label for="channelResultSecret">Generated secret key</label>
+                    <label for="channelResultSecret" data-i18n="channel.generated_secret">Generierter Secret Key</label>
                     <textarea id="channelResultSecret" rows="3" readonly></textarea>
                 </div>
 
                 <div id="channelQrGroup" class="form-group" style="display:none;">
-                    <label>QR Code</label>
+                    <label data-i18n="channel.qr_code">QR-Code</label>
                     <div id="channelQrCode" class="channel-qr-code"></div>
                 </div>
 
@@ -1247,8 +1289,8 @@
             </div>
 
             <div class="modal-footer">
-                <button id="channelModalConfirmButton" type="button">OK</button>
-                <button id="channelModalCancelButton" type="button">Cancel</button>
+                <button id="channelModalConfirmButton" type="button" data-i18n="channel.ok">OK</button>
+                <button id="channelModalCancelButton" type="button" data-i18n="channel.cancel">Abbrechen</button>
             </div>
         </div>
     </div>
@@ -1256,24 +1298,24 @@
     <div id="discoverModal" class="modal-overlay" aria-hidden="true">
         <div class="modal-dialog">
             <div class="modal-header">
-                <h3>Repeater Discovery</h3>
+                <h3 data-i18n="discover.title">Repeater Discovery</h3>
             </div>
 
             <div class="modal-body">
                 <div class="form-group">
-                    <label>Status</label>
-                    <div id="discoverStatusText">Unbekannt</div>
+                    <label data-i18n="discover.status.label">Status</label>
+                    <div id="discoverStatusText" data-i18n="discover.status.unknown">Unbekannt</div>
                 </div>
 
                 <div class="form-group">
-                    <label>Letzter Job</label>
-                    <div id="discoverJobInfo" class="modal-subtitle">Noch kein Discover gestartet.</div>
+                    <label data-i18n="discover.job.label">Letzter Job</label>
+                    <div id="discoverJobInfo" class="modal-subtitle" data-i18n="discover.job.none">Noch kein Discover gestartet.</div>
                 </div>
 
                 <div class="form-group">
-                    <label>Gefundene Repeater</label>
+                    <label data-i18n="discover.results.label">Gefundene Repeater</label>
                     <div id="discoverResults" class="discover-results-list">
-                        <div class="discover-empty">Noch keine Ergebnisse.</div>
+                        <div class="discover-empty" data-i18n="discover.results.none">Noch keine Ergebnisse.</div>
                     </div>
                 </div>
 
@@ -1281,8 +1323,8 @@
             </div>
 
             <div class="modal-footer">
-                <button id="discoverRepeatButton" type="button">START</button>
-                <button id="discoverCloseButton" type="button">Schließen</button>
+                <button id="discoverRepeatButton" type="button" data-i18n="discover.button.start">START</button>
+                <button id="discoverCloseButton" type="button" data-i18n="discover.button.close">Schließen</button>
             </div>
         </div>
     </div>
@@ -1290,27 +1332,27 @@
     <div id="setupModal" class="modal-overlay" aria-hidden="true">
         <div class="modal-dialog">
             <div class="modal-header">
-                <h3>Companion Setup</h3>
+                <h3 data-i18n="setup.title">Companion Setup</h3>
             </div>
 
             <div class="modal-body">
                 <div class="form-group">
-                    <label for="setupNameInput">Name</label>
+                    <label for="setupNameInput" data-i18n="setup.name">Name</label>
                     <input id="setupNameInput" type="text" autocomplete="off">
                 </div>
 
                 <div class="form-group">
-                    <label for="setupLatInput">Latitude</label>
+                    <label for="setupLatInput" data-i18n="setup.latitude">Latitude</label>
                     <input id="setupLatInput" type="text" autocomplete="off">
                 </div>
 
                 <div class="form-group">
-                    <label for="setupLonInput">Longitude</label>
+                    <label for="setupLonInput" data-i18n="setup.longitude">Longitude</label>
                     <input id="setupLonInput" type="text" autocomplete="off">
                 </div>
 
                 <div class="form-group">
-                    <label>Feste Funkparameter</label>
+                    <label data-i18n="setup.fixed_radio">Feste Funkparameter</label>
                     <div>Frequenz: 869.618 MHz</div>
                     <div>Bandwidth: 62.5 kHz</div>
                     <div>SF: 8</div>
@@ -1322,8 +1364,8 @@
             </div>
 
             <div class="modal-footer">
-                <button id="setupApplyButton" type="button">Apply</button>
-                <button id="setupCancelButton" type="button">Cancel</button>
+                <button id="setupApplyButton" type="button" data-i18n="setup.apply">Apply</button>
+                <button id="setupCancelButton" type="button" data-i18n="setup.cancel">Cancel</button>
             </div>
         </div>
     </div>

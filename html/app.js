@@ -117,6 +117,28 @@ const icons =
     })
 };
 
+function getLocale()
+{
+    return getLanguage() === "en" ? "en-GB" : "de-DE";
+}
+
+function tr(key, fallback, vars = {})
+{
+    if (typeof t === "function")
+    {
+        return t(key, vars);
+    }
+
+    let text = fallback || key;
+
+    Object.keys(vars).forEach(function(name)
+    {
+        text = text.replaceAll("{" + name + "}", String(vars[name]));
+    });
+
+    return text;
+}
+
 function getSelectedChannel()
 {
     if (!state.chatRow || !isChannelRow(state.chatRow))
@@ -188,7 +210,7 @@ function closeChannelDialog()
     if (el.channelModalConfirmButton)
     {
         el.channelModalConfirmButton.disabled = false;
-        el.channelModalConfirmButton.textContent = "OK";
+        el.channelModalConfirmButton.textContent = tr("channel.ok", "OK");
     }
 
     if (el.channelModalCancelButton)
@@ -215,7 +237,7 @@ function renderChannelQrCode(payload)
 
     if (typeof QRCode === "undefined")
     {
-        el.channelQrCode.textContent = "QR-Code Bibliothek nicht geladen.";
+        el.channelQrCode.textContent = tr("error.qr_library_missing", "QR-Code Bibliothek nicht geladen.");
         return;
     }
 
@@ -284,30 +306,42 @@ function openChannelDialog(action)
     switch (action)
     {
         case "create_private":
-            el.channelModalTitle.textContent = "Create private channel";
-            el.channelModalSubtitle.textContent = "Neuen privaten Channel anlegen. Der Secret Key wird anschließend angezeigt.";
-            el.channelModalConfirmButton.textContent = "Create";
+            el.channelModalTitle.textContent = tr("channel.action.create_private.title", "Create private channel");
+            el.channelModalSubtitle.textContent = tr(
+                "channel.action.create_private.subtitle",
+                "Neuen privaten Channel anlegen. Der Secret Key wird anschließend angezeigt."
+            );
+            el.channelModalConfirmButton.textContent = tr("channel.action.create_private.confirm", "Create");
             el.channelSecretGroup.style.display = "none";
             break;
 
         case "join_private":
-            el.channelModalTitle.textContent = "Join private channel";
-            el.channelModalSubtitle.textContent = "Channelname und Secret Key eingeben.";
-            el.channelModalConfirmButton.textContent = "Join";
+            el.channelModalTitle.textContent = tr("channel.action.join_private.title", "Join private channel");
+            el.channelModalSubtitle.textContent = tr(
+                "channel.action.join_private.subtitle",
+                "Channelname und Secret Key eingeben."
+            );
+            el.channelModalConfirmButton.textContent = tr("channel.action.join_private.confirm", "Join");
             el.channelSecretGroup.style.display = "";
             break;
 
         case "join_public":
-            el.channelModalTitle.textContent = "Join public channel";
-            el.channelModalSubtitle.textContent = "Öffentlichen Channel über den Namen beitreten.";
-            el.channelModalConfirmButton.textContent = "Join";
+            el.channelModalTitle.textContent = tr("channel.action.join_public.title", "Join public channel");
+            el.channelModalSubtitle.textContent = tr(
+                "channel.action.join_public.subtitle",
+                "Öffentlichen Channel über den Namen beitreten."
+            );
+            el.channelModalConfirmButton.textContent = tr("channel.action.join_public.confirm", "Join");
             el.channelSecretGroup.style.display = "none";
             break;
 
         case "join_hashtag":
-            el.channelModalTitle.textContent = "Join hashtag channel";
-            el.channelModalSubtitle.textContent = "Hashtag-Channel eingeben, z. B. #drones.";
-            el.channelModalConfirmButton.textContent = "Join";
+            el.channelModalTitle.textContent = tr("channel.action.join_hashtag.title", "Join hashtag channel");
+            el.channelModalSubtitle.textContent = tr(
+                "channel.action.join_hashtag.subtitle",
+                "Hashtag-Channel eingeben, z. B. #drones."
+            );
+            el.channelModalConfirmButton.textContent = tr("channel.action.join_hashtag.confirm", "Join");
             el.channelSecretGroup.style.display = "none";
             break;
 
@@ -315,11 +349,18 @@ function openChannelDialog(action)
         {
             const selected = getSelectedChannel();
 
-            el.channelModalTitle.textContent = "Remove channel";
+            el.channelModalTitle.textContent = tr("channel.action.remove.title", "Remove channel");
             el.channelModalSubtitle.textContent = selected
-                ? `Channel wirklich entfernen: ${selected.name} (IDX ${selected.channel_idx})`
-                : "Kein Channel ausgewählt.";
-            el.channelModalConfirmButton.textContent = "Remove";
+                ? tr(
+                    "channel.action.remove.subtitle",
+                    "Channel wirklich entfernen: {name} (IDX {idx})",
+                    {
+                        name: selected.name,
+                        idx: selected.channel_idx
+                    }
+                )
+                : tr("channel.action.remove.none_selected", "Kein Channel ausgewählt.");
+            el.channelModalConfirmButton.textContent = tr("channel.action.remove.confirm", "Remove");
             el.channelNameGroup.style.display = "none";
             el.channelSecretGroup.style.display = "none";
             break;
@@ -348,7 +389,7 @@ function showChannelDialogError(message)
         return;
     }
 
-    el.channelModalError.textContent = message || "Unbekannter Fehler";
+    el.channelModalError.textContent = message || tr("error.unknown", "Unbekannter Fehler");
     el.channelModalError.style.display = "block";
 }
 
@@ -386,30 +427,30 @@ function getChatKindLabel(row)
 {
     if (isRoomNode(row))
     {
-        return "Room";
+        return tr("channel.type.room", "Room");
     }
 
     if (isChannelRow(row))
     {
-        return "Channel";
+        return tr("channel.type.channel", "Channel");
     }
 
-    return "Chat";
+    return tr("channel.type.chat", "Chat");
 }
 
 function getChatKindValue(row)
 {
     if (isRoomNode(row))
     {
-        return "room";
+        return tr("channel.kind.room", "room");
     }
 
     if (isChannelRow(row))
     {
-        return "channel";
+        return tr("channel.kind.channel", "channel");
     }
 
-    return "dm";
+    return tr("channel.kind.dm", "dm");
 }
 
 function getMarkerIcon(row)
@@ -457,7 +498,7 @@ function formatDateTime(value)
         return value;
     }
 
-    return date.toLocaleString("de-DE");
+    return date.toLocaleString(getLocale());
 }
 
 function formatEpochDateTime(epochSeconds)
@@ -469,7 +510,7 @@ function formatEpochDateTime(epochSeconds)
         return "-";
     }
 
-    return new Date(value * 1000).toLocaleString("de-DE");
+    return new Date(value * 1000).toLocaleString(getLocale());
 }
 
 function containsPossibleCallsign(value)
@@ -666,7 +707,7 @@ async function fetchJson(url, options = {})
     }
     catch (jsonError)
     {
-        throw new Error(`HTTP ${response.status} (keine gültige JSON-Antwort)`);
+        throw new Error(`HTTP ${response.status} (${tr("error.invalid_json", "keine gültige JSON-Antwort")})`);
     }
 
     if (!response.ok)
@@ -676,7 +717,7 @@ async function fetchJson(url, options = {})
 
     if (!data || data.success === false)
     {
-        throw new Error(data?.error || "Unbekannter Fehler");
+        throw new Error(data?.error || tr("error.unknown", "Unbekannter Fehler"));
     }
 
     return data;
@@ -730,7 +771,10 @@ function renderDiscoverResults(results)
 
     if (!Array.isArray(results) || results.length === 0)
     {
-        el.discoverResults.innerHTML = '<div class="discover-empty">Noch keine Ergebnisse.</div>';
+        el.discoverResults.innerHTML =
+            '<div class="discover-empty">' +
+            escapeHtml(tr("discover.results.none", "Noch keine Ergebnisse.")) +
+            '</div>';
         return;
     }
 
@@ -746,7 +790,7 @@ function renderDiscoverResults(results)
                 `<span>SNR RX: ${row.snr_rx_db}</span>` +
                 `<span>SNR TX: ${row.snr_tx_db}</span>` +
                 `<span>RSSI: ${row.rssi_dbm}</span>` +
-                `<span>Update: ${escapeHtml(row.updated_at || "-")}</span>` +
+                `<span>${escapeHtml(tr("discover.updated", "Update"))}: ${escapeHtml(row.updated_at || "-")}</span>` +
             `</div>`;
 
         el.discoverResults.appendChild(item);
@@ -758,22 +802,22 @@ function discoverStatusSymbol(status)
     switch (status)
     {
         case "queued":
-            return { icon: "⏳", title: "Warteschlange" };
+            return { icon: "⏳", title: tr("discover.status.queued", "Warteschlange") };
 
         case "running":
-            return { icon: "⚙", title: "läuft" };
+            return { icon: "⚙", title: tr("discover.status.running", "läuft") };
 
         case "done":
-            return { icon: "✔", title: "fertig" };
+            return { icon: "✔", title: tr("discover.status.done", "fertig") };
 
         case "failed":
-            return { icon: "✖", title: "Fehler" };
+            return { icon: "✖", title: tr("discover.status.failed", "Fehler") };
 
         case "skipped":
-            return { icon: "⤼", title: "übersprungen" };
+            return { icon: "⤼", title: tr("discover.status.skipped", "übersprungen") };
 
         default:
-            return { icon: "?", title: status || "unbekannt" };
+            return { icon: "?", title: status || tr("discover.status.unknown_fallback", "unbekannt") };
     }
 }
 
@@ -832,25 +876,25 @@ function formatDiscoverJobInfo(job)
     [
         `Job ${job.id}`,
         `${symbol.icon} ${symbol.title}`,
-        `Treffer: ${job.result_count}`,
+        `${tr("discover.results_count", "Treffer")}: ${job.result_count}`,
     ];
 
     if (job.finished_at)
     {
-        parts.push(`beendet: ${job.finished_at}`);
+        parts.push(`${tr("discover.finished", "beendet")}: ${job.finished_at}`);
     }
     else if (job.started_at)
     {
-        parts.push(`gestartet: ${job.started_at}`);
+        parts.push(`${tr("discover.started", "gestartet")}: ${job.started_at}`);
     }
     else if (job.created_at)
     {
-        parts.push(`angelegt: ${job.created_at}`);
+        parts.push(`${tr("discover.created", "angelegt")}: ${job.created_at}`);
     }
 
     if (job.error_text)
     {
-        parts.push(`Fehler: ${job.error_text}`);
+        parts.push(`${tr("discover.error_label", "Fehler")}: ${job.error_text}`);
     }
 
     return parts.join(", ");
@@ -985,7 +1029,7 @@ async function handleDiscoverStartClick()
         if (el.discoverModalError)
         {
             el.discoverModalError.textContent =
-                error.message || "Discover konnte nicht gestartet werden.";
+                error.message || tr("discover.error.start_failed", "Discover konnte nicht gestartet werden.");
             el.discoverModalError.style.display = "block";
         }
     }
@@ -1010,7 +1054,7 @@ async function refreshDiscoverModal()
         if (el.discoverModalError)
         {
             el.discoverModalError.textContent =
-                error.message || "Discover-Status konnte nicht geladen werden.";
+                error.message || tr("discover.error.status_failed", "Discover-Status konnte nicht geladen werden.");
             el.discoverModalError.style.display = "block";
         }
     }
@@ -1102,7 +1146,12 @@ function showEmptyRightPanel()
 
     if (el.mapEmpty)
     {
-        el.mapEmpty.innerHTML = "Linksklick auf Chat, Room oder Channel = Verlauf, Rechtsklick = Karte.";
+        el.mapEmpty.innerHTML = escapeHtml(
+            tr(
+                "map.empty.default",
+                "Linksklick auf Chat, Room oder Channel = Verlauf, Rechtsklick = Karte."
+            )
+        );
         el.mapEmpty.style.display = "grid";
     }
 }
@@ -1117,7 +1166,9 @@ function showInfoForRow(row)
 
     if (el.mapEmpty)
     {
-        el.mapEmpty.innerHTML = `📍 <strong>${escapeHtml(row.name || "-")}</strong> keine Positionsdaten verfügbar.`;
+        el.mapEmpty.innerHTML =
+            `📍 <strong>${escapeHtml(row.name || "-")}</strong> ` +
+            escapeHtml(tr("map.no_position_for_node", "keine Positionsdaten verfügbar."));
         el.mapEmpty.style.display = "grid";
     }
 }
@@ -1196,7 +1247,9 @@ function showAllNodesMap()
 
         if (el.mapEmpty)
         {
-            el.mapEmpty.innerHTML = "Keine Nodes mit Position vorhanden.";
+            el.mapEmpty.innerHTML = escapeHtml(
+                tr("map.empty.no_nodes", "Keine Nodes mit Position vorhanden.")
+            );
         }
 
         return;
@@ -1354,30 +1407,30 @@ function advertTypeFormatter(cell)
     {
         case "CHAT":
             icon = "chat.svg";
-            text = "Chat";
+            text = tr("type.chat", "Chat");
             break;
 
         case "REPEATER":
             icon = "repeater.svg";
-            text = "Repeater";
+            text = tr("type.repeater", "Repeater");
             break;
 
         case "ROOM":
             icon = "room.svg";
-            text = "Room";
+            text = tr("type.room", "Room");
             break;
 
         case "SENSOR":
             icon = "sensor.png";
-            text = "Sensor";
+            text = tr("type.sensor", "Sensor");
             break;
 
         case "UNKNOWN":
-            text = "Unknown";
+            text = tr("type.unknown", "Unknown");
             break;
 
         default:
-            text = String(type || "Unknown");
+            text = String(type || tr("type.unknown", "Unknown"));
             break;
     }
 
@@ -1454,7 +1507,7 @@ function renderOutgoingMessage(msg)
     );
 
     const textValue = escapeHtml(msg.text || msg.message_text || "");
-    const statusText = escapeHtml(String(msg.ui_status_text || "Pending"));
+    const statusText = escapeHtml(String(msg.ui_status_text || tr("chat.status.pending", "Pending")));
     const statusClass = getOutgoingStatusClass(msg);
 
     return `
@@ -1462,7 +1515,7 @@ function renderOutgoingMessage(msg)
             <div class="chat-message-header">
                 <div class="chat-message-meta">
                     <span>${dateText}</span>
-                    <span>Du</span>
+                    <span>${escapeHtml(tr("chat.you", "Du"))}</span>
                 </div>
             </div>
             <div class="chat-message-text">${textValue}</div>
@@ -1499,8 +1552,8 @@ function renderIncomingMessage(msg)
             <div class="chat-message-header">
                 <div class="chat-message-meta">
                     <span>${dateText}</span>
-                    <span>SNR: ${escapeHtml(snr)}</span>
-                    <span>Path: ${escapeHtml(path)}</span>
+                    <span>${escapeHtml(tr("chat.snr", "SNR"))}: ${escapeHtml(snr)}</span>
+                    <span>${escapeHtml(tr("chat.path", "Path"))}: ${escapeHtml(path)}</span>
                 </div>
             </div>
             ${senderBlock}
@@ -1521,7 +1574,10 @@ function renderChatMessages(messages)
 
     if (state.chatMessages.length === 0)
     {
-        el.chatBody.innerHTML = '<div class="chat-empty">Keine Messages für diesen Eintrag gefunden.</div>';
+        el.chatBody.innerHTML =
+            '<div class="chat-empty">' +
+            escapeHtml(tr("chat.empty", "Keine Messages für diesen Eintrag gefunden.")) +
+            '</div>';
 
         if (shouldAutoScroll)
         {
@@ -1634,7 +1690,10 @@ async function showChatForRow(row)
 
     const chatName = row.name || getChatKindLabel(row);
     el.chatTitle.textContent = `${getChatKindLabel(row)}: ${chatName}`;
-    el.chatBody.innerHTML = '<div class="chat-empty">Lade Messages ...</div>';
+    el.chatBody.innerHTML =
+        '<div class="chat-empty">' +
+        escapeHtml(tr("chat.loading", "Lade Messages ...")) +
+        '</div>';
     el.chatView.style.display = "flex";
 
     try
@@ -1652,7 +1711,10 @@ async function showChatForRow(row)
     {
         el.chatBody.innerHTML = `
             <div class="chat-error">
-                Fehler beim Laden der Messages: ${escapeHtml(error.message || "Unbekannter Fehler")}
+                ${escapeHtml(tr("chat.error_loading", "Fehler beim Laden der Messages: {message}",
+                {
+                    message: error.message || tr("error.unknown", "Unbekannter Fehler")
+                }))}
             </div>
         `;
     }
@@ -1710,12 +1772,21 @@ function openRoomPasswordDialog(context)
 
     if (el.roomPasswordTitle)
     {
-        el.roomPasswordTitle.textContent = `Passwort für Room ${context.roomName}`;
+        el.roomPasswordTitle.textContent = tr(
+            "room_password.title_with_name",
+            "Passwort für Room {name}",
+            {
+                name: context.roomName
+            }
+        );
     }
 
     if (el.roomPasswordSubtitle)
     {
-        el.roomPasswordSubtitle.textContent = "Das Backend meldet: room password required";
+        el.roomPasswordSubtitle.textContent = tr(
+            "room_password.subtitle.required",
+            "Das Backend meldet: room password required"
+        );
     }
 
     if (el.roomPasswordError)
@@ -1773,7 +1844,10 @@ async function handleRoomPasswordSave()
     {
         if (el.roomPasswordError)
         {
-            el.roomPasswordError.textContent = "Bitte ein Passwort eingeben.";
+            el.roomPasswordError.textContent = tr(
+                "room_password.error.empty",
+                "Bitte ein Passwort eingeben."
+            );
             el.roomPasswordError.style.display = "block";
         }
 
@@ -1808,7 +1882,8 @@ async function handleRoomPasswordSave()
     {
         if (el.roomPasswordError)
         {
-            el.roomPasswordError.textContent = error.message || "Speichern fehlgeschlagen.";
+            el.roomPasswordError.textContent =
+                error.message || tr("room_password.error.save_failed", "Speichern fehlgeschlagen.");
             el.roomPasswordError.style.display = "block";
         }
     }
@@ -2026,7 +2101,10 @@ function renderChannelsList()
 
     if (!Array.isArray(state.channels) || state.channels.length === 0)
     {
-        listEl.innerHTML = "<div class=\"channels-empty\">Keine Channels vorhanden</div>";
+        listEl.innerHTML =
+            "<div class=\"channels-empty\">" +
+            escapeHtml(tr("channels.none", "Keine Channels vorhanden")) +
+            "</div>";
         return;
     }
 
@@ -2047,7 +2125,7 @@ function renderChannelsList()
         const channelName =
             (channel.name && String(channel.name).trim() !== "")
                 ? String(channel.name)
-                : ("Channel " + String(channelIdx));
+                : (tr("channel.fallback_name", "Channel {idx}", { idx: channelIdx }));
 
         if (
             state.chatRow &&
@@ -2067,17 +2145,17 @@ function renderChannelsList()
 
         if (channel.is_default)
         {
-            metaParts.push("default");
+            metaParts.push(tr("channel.meta.default", "default"));
         }
 
         if (channel.is_observed)
         {
-            metaParts.push("observed");
+            metaParts.push(tr("channel.meta.observed", "observed"));
         }
 
         if (!channel.enabled)
         {
-            metaParts.push("disabled");
+            metaParts.push(tr("channel.meta.disabled", "disabled"));
         }
 
         const metaEl = document.createElement("span");
@@ -2146,13 +2224,18 @@ async function sendCurrentChatMessage()
     {
         if (!state.chatRow.enabled)
         {
-            window.alert("Dieser Channel ist deaktiviert.");
+            window.alert(tr("channel.send.disabled", "Dieser Channel ist deaktiviert."));
             return;
         }
 
         if (state.chatRow.is_observed)
         {
-            window.alert("Für diesen beobachteten Channel ist kein lokaler Sendekontext konfiguriert.");
+            window.alert(
+                tr(
+                    "channel.send.observed_no_context",
+                    "Für diesen beobachteten Channel ist kein lokaler Sendekontext konfiguriert."
+                )
+            );
             return;
         }
     }
@@ -2187,7 +2270,12 @@ async function sendCurrentChatMessage()
     }
     catch (error)
     {
-        window.alert(`Fehler beim Senden: ${error.message || "Unbekannter Fehler"}`);
+        window.alert(
+            tr("chat.send_error", "Fehler beim Senden: {message}",
+            {
+                message: error.message || tr("error.unknown", "Unbekannter Fehler")
+            })
+        );
     }
     finally
     {
@@ -2226,7 +2314,7 @@ table = new Tabulator("#nodesTable",
     ajaxContentType: "json",
     ajaxLoader: false,
     progressiveLoad: false,
-    placeholder: "Keine Nodes gefunden.",
+    placeholder: tr("table.placeholder.no_nodes", "Keine Nodes gefunden."),
     index: "id",
     initialSort:
     [
@@ -2235,7 +2323,7 @@ table = new Tabulator("#nodesTable",
     columns:
     [
         {
-            title: "Type",
+            title: tr("table.column.type", "Type"),
             field: "advert_type_label",
             width: 120,
             hozAlign: "left",
@@ -2243,7 +2331,7 @@ table = new Tabulator("#nodesTable",
             headerSort: true
         },
         {
-            title: "Name",
+            title: tr("table.column.name", "Name"),
             field: "name",
             sorter: "string",
             headerSort: true,
@@ -2283,7 +2371,7 @@ table = new Tabulator("#nodesTable",
             }
         },
         {
-            title: "Last",
+            title: tr("table.column.last", "Last"),
             field: "last_advert_at",
             width: 90,
             hozAlign: "left",
@@ -2297,7 +2385,7 @@ table = new Tabulator("#nodesTable",
     {
         if (!response.success)
         {
-            throw new Error(response.error || "Unbekannter Fehler");
+            throw new Error(response.error || tr("error.unknown", "Unbekannter Fehler"));
         }
 
         const nodes = response.nodes || [];
@@ -2336,9 +2424,10 @@ table = new Tabulator("#nodesTable",
     },
     ajaxError: function(xhr, textStatus, errorThrown)
     {
-        const message = errorThrown || textStatus || "HTTP Fehler";
-        el.tableError.innerHTML = `<div class="error-box">Fehler beim Laden: ${message}</div>`;
-        el.nodeCount.textContent = "Fehler";
+        const message = errorThrown || textStatus || tr("error.http", "HTTP Fehler");
+        el.tableError.innerHTML =
+            `<div class="error-box">${escapeHtml(tr("error.loading", "Fehler beim Laden: {message}", { message: message }))}</div>`;
+        el.nodeCount.textContent = tr("status.error", "Fehler");
     }
 });
 
@@ -2455,7 +2544,7 @@ async function handleChannelDialogConfirm()
 
             if (!selected)
             {
-                throw new Error("Kein Channel ausgewählt.");
+                throw new Error(tr("channel.none_selected", "Kein Channel ausgewählt."));
             }
 
             await deleteChannel(selected.channel_idx);
@@ -2479,7 +2568,7 @@ async function handleChannelDialogConfirm()
 
         if (!payload)
         {
-            throw new Error("Ungültige Aktion.");
+            throw new Error(tr("channel.invalid_action", "Ungültige Aktion."));
         }
 
         const result = await saveChannel(payload);
@@ -2518,7 +2607,10 @@ async function handleChannelDialogConfirm()
 
             if (el.channelModalSubtitle)
             {
-                el.channelModalSubtitle.textContent = "Channel wurde erstellt. Diesen Secret Key jetzt mit den anderen Teilnehmern teilen.";
+                el.channelModalSubtitle.textContent = tr(
+                    "channel.action.create_private.done_subtitle",
+                    "Channel wurde erstellt. Diesen Secret Key jetzt mit den anderen Teilnehmern teilen."
+                );
             }
 
             const qrPayload = buildMeshCoreChannelQrPayload(
@@ -2530,7 +2622,7 @@ async function handleChannelDialogConfirm()
 
             if (el.channelModalConfirmButton)
             {
-                el.channelModalConfirmButton.textContent = "Done";
+                el.channelModalConfirmButton.textContent = tr("common.done", "Done");
                 el.channelModalConfirmButton.disabled = false;
             }
 
@@ -2548,7 +2640,7 @@ async function handleChannelDialogConfirm()
     }
     catch (error)
     {
-        showChannelDialogError(error.message || "Fehler");
+        showChannelDialogError(error.message || tr("error.generic", "Fehler"));
     }
     finally
     {
@@ -2586,11 +2678,24 @@ function updateLeftCounter()
 
         if (observedCount > 0)
         {
-            el.nodeCount.textContent = `${count} Channels (${observedCount} observed)`;
+            el.nodeCount.textContent = tr(
+                "counter.channels_observed",
+                "{count} Channels ({observed} observed)",
+                {
+                    count: count,
+                    observed: observedCount
+                }
+            );
         }
         else
         {
-            el.nodeCount.textContent = `${count} Channels`;
+            el.nodeCount.textContent = tr(
+                "counter.channels",
+                "{count} Channels",
+                {
+                    count: count
+                }
+            );
         }
 
         return;
@@ -2598,19 +2703,25 @@ function updateLeftCounter()
 
     if (typeof table === "undefined" || !table)
     {
-        el.nodeCount.textContent = "0 Nodes";
+        el.nodeCount.textContent = tr("counter.nodes", "0 Nodes", { count: 0 });
         return;
     }
 
     const rows = table.getData();
     const count = Array.isArray(rows) ? rows.length : 0;
 
-    el.nodeCount.textContent = `${count} Nodes`;
+    el.nodeCount.textContent = tr(
+        "counter.nodes",
+        "{count} Nodes",
+        {
+            count: count
+        }
+    );
 }
 
 function updatePageTitle(nodeName)
 {
-    const baseTitle = "MeshCore Web-Dashboard";
+    const baseTitle = tr("page.title", "MeshCore Web-Dashboard");
 
     if (el.pageTitle)
     {
@@ -2621,7 +2732,7 @@ function updatePageTitle(nodeName)
 
     document.title = nodeName
         ? "MeshCore – " + nodeName
-        : "MeshCore Dashboard";
+        : tr("document.title", "MeshCore Dashboard");
 }
 
 function initLeftTabs()
@@ -2710,7 +2821,7 @@ async function openSetupDialog()
         if (el.setupModalError)
         {
             el.setupModalError.textContent =
-                error.message || "Setup-Werte konnten nicht geladen werden.";
+                error.message || tr("setup.error.load_failed", "Setup-Werte konnten nicht geladen werden.");
             el.setupModalError.style.display = "block";
         }
     }
@@ -2781,17 +2892,17 @@ async function applyCompanionSetup()
 
     if (name === "")
     {
-        throw new Error("Name fehlt.");
+        throw new Error(tr("setup.error.name_missing", "Name fehlt."));
     }
 
     if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90)
     {
-        throw new Error("Latitude ist ungültig.");
+        throw new Error(tr("setup.error.latitude_invalid", "Latitude ist ungültig."));
     }
 
     if (!Number.isFinite(longitude) || longitude < -180 || longitude > 180)
     {
-        throw new Error("Longitude ist ungültig.");
+        throw new Error(tr("setup.error.longitude_invalid", "Longitude ist ungültig."));
     }
 
     return await fetchJson("companion_setup.php",
@@ -2841,7 +2952,8 @@ if (el.setupApplyButton)
         {
             if (el.setupModalError)
             {
-                el.setupModalError.textContent = error.message || "Setup fehlgeschlagen.";
+                el.setupModalError.textContent =
+                    error.message || tr("setup.error.apply_failed", "Setup fehlgeschlagen.");
                 el.setupModalError.style.display = "block";
             }
         }
