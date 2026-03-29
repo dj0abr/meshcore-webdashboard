@@ -117,6 +117,77 @@ const icons =
     })
 };
 
+function getChatInputText()
+{
+    if (!el.chatInput)
+    {
+        return "";
+    }
+
+    return (el.chatInput.textContent || "").replace(/\u00a0/g, " ");
+}
+
+function placeCaretAtEnd(element)
+{
+    if (!element)
+    {
+        return;
+    }
+
+    const selection = window.getSelection();
+
+    if (!selection)
+    {
+        return;
+    }
+
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    range.collapse(false);
+    selection.removeAllRanges();
+    selection.addRange(range);
+}
+
+function updateChatInputHighlight()
+{
+    if (!el.chatInput)
+    {
+        return;
+    }
+
+    const maxLength = Number(el.chatInput.dataset.maxLength || 400);
+    const rawText = getChatInputText().slice(0, maxLength);
+    const highlightLimit = Number(el.chatInput.dataset.highlightLimit || 60);
+    const withinLimit = rawText.slice(0, highlightLimit);
+    const overLimit = rawText.slice(highlightLimit);
+
+    if (rawText === "")
+    {
+        el.chatInput.innerHTML = "";
+        return;
+    }
+
+    let html = `<span class="chat-input-normal">${escapeHtml(withinLimit)}</span>`;
+
+    if (overLimit !== "")
+    {
+        html += `<span class="chat-input-overlimit">${escapeHtml(overLimit)}</span>`;
+    }
+
+    el.chatInput.innerHTML = html;
+    placeCaretAtEnd(el.chatInput);
+}
+
+function clearChatInput()
+{
+    if (!el.chatInput)
+    {
+        return;
+    }
+
+    el.chatInput.innerHTML = "";
+}
+
 function getLocale()
 {
     const lang = getLanguage();
@@ -604,9 +675,14 @@ function isRoomPasswordPromptSuppressed(roomNodeId)
 
 function setChatInputEnabled(enabled)
 {
-    if (el.chatInput)
+    /*if (el.chatInput)
     {
         el.chatInput.disabled = !enabled;
+    }*/
+    if (el.chatInput)
+    {
+        el.chatInput.contentEditable = enabled ? "true" : "false";
+        el.chatInput.setAttribute("aria-disabled", enabled ? "false" : "true");
     }
 
     if (el.chatSendButton)
@@ -1410,7 +1486,7 @@ function lastAdvertSorter(a, b)
 
     return aTs - bTs;
 }
-
+ 
 function advertTypeFormatter(cell)
 {
     const row = cell.getRow().getData();
@@ -2224,7 +2300,7 @@ async function sendCurrentChatMessage()
         return;
     }
 
-    const messageText = el.chatInput.value.trim();
+    const messageText = getChatInputText().trim();
 
     if (messageText === "")
     {
@@ -2276,7 +2352,7 @@ async function sendCurrentChatMessage()
             body: JSON.stringify(buildOutgoingPayload(state.chatRow, messageText))
         });
 
-        el.chatInput.value = "";
+        clearChatInput();
         await loadChatMessages(state.chatRow, false);
 
         if (data.id)
@@ -3024,6 +3100,21 @@ if (el.chatInput)
             sendCurrentChatMessage();
         }
     });
+
+    el.chatInput.addEventListener("input", function()
+    {
+        updateChatInputHighlight();
+    });
+
+    el.chatInput.addEventListener("paste", function(e)
+    {
+        e.preventDefault();
+
+        const pastedText = (e.clipboardData || window.clipboardData).getData("text");
+        document.execCommand("insertText", false, pastedText.replace(/[\r\n]+/g, " "));
+    });
+
+    updateChatInputHighlight();
 }
 
 if (el.chatSendButton)

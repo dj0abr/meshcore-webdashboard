@@ -921,7 +921,14 @@ function applyTranslations()
 
     document.querySelectorAll("[data-i18n-placeholder]").forEach(function(node)
     {
-        node.placeholder = t(node.dataset.i18nPlaceholder);
+        const translatedPlaceholder = t(node.dataset.i18nPlaceholder);
+
+        if ("placeholder" in node)
+        {
+            node.placeholder = translatedPlaceholder;
+        }
+
+        node.setAttribute("data-placeholder", translatedPlaceholder);
     });
 
     document.querySelectorAll("[data-i18n-title]").forEach(function(node)

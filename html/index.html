@@ -601,6 +601,7 @@
         {
             flex: 1;
             min-width: 0;
+            min-height: 44px;
             padding: 12px 14px;
             border: 1px solid var(--border);
             border-radius: 8px;
@@ -608,11 +609,32 @@
             color: var(--text);
             outline: none;
             font-size: 14px;
+            line-height: 1.4;
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
+            cursor: text;
         }
 
         .chat-input:focus
         {
             border-color: var(--accent);
+        }
+
+        .chat-input:empty::before
+        {
+            content: attr(data-placeholder);
+            color: var(--muted);
+            pointer-events: none;
+        }
+
+        .chat-input-normal
+        {
+            color: var(--text);
+        }
+
+        .chat-input-overlimit
+        {
+            color: #f59e0b;
         }
 
         .chat-send-button
@@ -1212,19 +1234,21 @@
                     <div id="chatBody" class="chat-view-body"></div>
 
                     <div class="chat-input-bar">
-                        <input
+                        <div
                             id="chatInput"
                             class="chat-input"
-                            type="text"
-                            maxlength="400"
-                            autocomplete="off"
+                            contenteditable="true"
+                            role="textbox"
+                            aria-multiline="false"
+                            spellcheck="false"
+                            data-max-length="400"
+                            data-highlight-limit="60"
                             data-i18n-placeholder="chat.input_placeholder"
-                            placeholder="Nachricht eingeben und Enter drücken ..."
-                        >
+                            data-placeholder="Nachricht eingeben und Enter drücken ..."
+                        ></div>
                         <button id="chatSendButton" class="chat-send-button" type="button" data-i18n="chat.send">Senden</button>
                     </div>
-                </div>
-
+                    
                 <div id="mapEmpty" class="empty-state" data-i18n="map.empty.default">
                     Linksklick auf Chat oder Room = Verlauf, Rechtsklick = Karte.
                 </div>

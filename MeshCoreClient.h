@@ -86,6 +86,8 @@ public:
 
     // Basic
     std::optional<uint32_t> getTime();   // epoch secs (UTC)
+    bool setTime(uint32_t epochSecsUtc);
+    bool syncClock();
     std::optional<uint32_t> getNodeID(); // derived from self public key (first 4 bytes, BE)
 
     // Contacts

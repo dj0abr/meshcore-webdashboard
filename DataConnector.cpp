@@ -12,7 +12,8 @@ static const char* advertTypeStrings[] =
     "NONE",
     "CHAT",
     "REPEATER",
-    "ROOM"
+    "ROOM",
+    "SENSOR"
 };
 
 std::string DataConnector::u32hex(uint32_t v)
@@ -121,6 +122,9 @@ DataConnector::EventType DataConnector::GetEventType(const PushUnknownInfo&)
 std::string DataConnector::FormatAdvert(const AdvertInfo& info)
 {
     std::ostringstream oss;
+
+    //const uint8_t rawType = static_cast<uint8_t>(info.type);
+    //printf("raw: %d\n",rawType);
 
     oss
         << " - " << u32hex(info.nodeId)
@@ -334,6 +338,7 @@ void DataConnector::EmitFormatted(EventType eventType, const std::string& line)
 void DataConnector::Emit(const AdvertInfo& info)
 {
     const std::string line = FormatAdvert(info);
+//printf("Adv: %s\n",line.c_str())    ;
     MeshDB::StoreAdvert(info, line);
     EmitFormatted(GetEventType(info), line);
 }

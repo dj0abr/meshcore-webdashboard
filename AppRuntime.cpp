@@ -46,6 +46,11 @@ bool AppRuntime::InitializeClient()
     }
 
     m_client.setManualAddContacts(false);
+    if (!m_client.syncClock())
+    {
+        std::cerr << "syncClock() failed\n";
+        return false;
+    }
     m_client.sendSelfAdvert(true);
 
     auto id = m_client.getNodeID();

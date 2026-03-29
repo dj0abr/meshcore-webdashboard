@@ -1554,3 +1554,32 @@ std::optional<std::vector<MeshCoreClient::DiscoverResult>> MeshCoreClient::disco
 
     return out;
 }
+
+bool MeshCoreClient::setTime(uint32_t epochSecsUtc)
+{
+    if (!isConnected())
+    {
+        return false;
+    }
+
+    std::vector<uint8_t> cmd;
+    cmd.reserve(1 + 4);
+    cmd.push_back(MeshCoreProto::CMD_SET_DEVICE_TIME);
+    cmd.push_back(static_cast<uint8_t>(epochSecsUtc & 0xFF));
+    cmd.push_back(static_cast<uint8_t>((epochSecsUtc >> 8) & 0xFF));
+    cmd.push_back(static_cast<uint8_t>((epochSecsUtc >> 16) & 0xFF));
+    cmd.push_back(static_cast<uint8_t>((epochSecsUtc >> 24) & 0xFF));
+
+    std::optional<std::vector<uint8_t>> resp;
+    {
+        std::lock_guard<std::mutex> apiLock(m_apiMutex);
+        resp = m_link.requestResponse(cmd, MeshCoreProto::RESP_CODE_OK, 3000);
+    }
+
+    return resp.has_value();
+}
+
+bool MeshCoreClient::syncClock()
+{
+    return setTime(nowUtcEpoch());
+}

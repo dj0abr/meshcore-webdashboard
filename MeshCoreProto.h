@@ -21,6 +21,7 @@ namespace MeshCoreProto
     static constexpr uint8_t CMD_SEND_CHANNEL_TXT_MSG = 3;
     static constexpr uint8_t CMD_GET_CONTACTS      = 4;
     static constexpr uint8_t CMD_GET_DEVICE_TIME   = 5;
+    static constexpr uint8_t CMD_SET_DEVICE_TIME   = 6;
     static constexpr uint8_t CMD_SEND_SELF_ADVERT  = 7;
     static constexpr uint8_t CMD_SET_ADVERT_NAME = 8;
     static constexpr uint8_t CMD_SYNC_NEXT_MESSAGE = 10;

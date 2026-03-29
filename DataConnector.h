@@ -31,6 +31,7 @@ public:
         CHAT,
         REPEATER,
         ROOM,
+        SENSOR,
         COUNT
     };
 
