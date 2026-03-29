@@ -113,13 +113,17 @@ public:
     struct PushNewAdvertInfo
     {
         bool valid;
+        uint32_t nodeId {};
+        uint8_t type {};
+        uint8_t flags {};
         std::string name;
-        std::array<uint8_t, 6> prefix6;
-        uint32_t lastAdvert;
-        uint32_t lastMod;
+        std::array<uint8_t, 32> publicKey {};
+        std::array<uint8_t, 6> prefix6 {};
+        uint32_t lastAdvert {};
+        uint32_t lastMod {};
         int32_t advLatE6 {};
         int32_t advLonE6 {};
-        size_t payloadLen;
+        size_t payloadLen {};
     };
 
     struct PushUnknownInfo

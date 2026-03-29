@@ -117,6 +117,22 @@ const icons =
     })
 };
 
+function normalizeGuiTimestamp(timestamp)
+{
+    if (!timestamp || timestamp <= 0)
+    {
+        return 0;
+    }
+
+    // Wenn Zeit in der Zukunft liegt → auf 365 Tage in der Vergangenheit setzen
+    if (timestamp > Date.now())
+    {
+        return Date.now() - (365 * 24 * 60 * 60 * 1000);
+    }
+
+    return timestamp;
+}
+
 function getChatInputText()
 {
     if (!el.chatInput)
@@ -1391,7 +1407,7 @@ function relativeTime(cell)
         return '<div class="last-seen unknown">?</div>';
     }
 
-    const timestamp = parseMariaDbDateTime(value);
+    const timestamp = normalizeGuiTimestamp(parseMariaDbDateTime(value));
 
     if (!timestamp)
     {
@@ -1456,7 +1472,7 @@ function lastAdvertSorter(a, b)
             return null;
         }
 
-        const ts = parseMariaDbDateTime(value);
+        const ts = normalizeGuiTimestamp(parseMariaDbDateTime(value));
 
         if (!ts || ts <= 0)
         {
@@ -2489,19 +2505,17 @@ table = new Tabulator("#nodesTable",
                 return false;
             }
 
-            const timestamp = parseMariaDbDateTime(node.last_advert_at);
+            //let timestamp = parseMariaDbDateTime(node.last_advert_at);
+            let timestamp = normalizeGuiTimestamp(parseMariaDbDateTime(node.last_advert_at));
+
+            timestamp = normalizeGuiTimestamp(timestamp);
 
             if (!timestamp || timestamp <= 0)
             {
                 return false;
             }
 
-            const diff = Math.floor((Date.now() - timestamp) / 1000);
-
-            if (diff <= 0)
-            {
-                return false;
-            }
+            const diff = Math.floor((Date.now() - timestamp) / 1000)
 
             if (el.callsignFilter && el.callsignFilter.checked)
             {

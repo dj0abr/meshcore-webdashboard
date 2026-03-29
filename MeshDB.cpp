@@ -753,6 +753,9 @@ bool MeshDB::UpsertNodeFromAdvert(const DataConnector::AdvertInfo& info)
     const std::string publicKeyHex =
         DataConnector::hexBytes(info.publicKey.data(), info.publicKey.size());
 
+    const std::string prefix6Hex =
+        DataConnector::hexBytes(info.publicKey.data(), 6);
+
     const bool hasLocation = (info.advLatE6 != 0) || (info.advLonE6 != 0);
     const std::time_t lastAdvert = info.lastAdvert;
 
@@ -760,34 +763,33 @@ bool MeshDB::UpsertNodeFromAdvert(const DataConnector::AdvertInfo& info)
 
     oss
         << "INSERT INTO nodes ("
-        << "node_id, advert_type, advert_flags, name, public_key_hex, last_advert_at, adv_lat_e6, adv_lon_e6"
+        << "node_id, advert_type, advert_flags, name, public_key_hex, prefix6_hex, last_advert_at, adv_lat_e6, adv_lon_e6"
         << ") VALUES ("
         << info.nodeId << ", "
         << unsigned(info.type) << ", "
         << unsigned(info.flags) << ", "
         << ToSqlString(info.name) << ", "
         << ToSqlString(publicKeyHex) << ", "
+        << ToSqlString(prefix6Hex) << ", "
         << ToSqlDateTime(lastAdvert) << ", ";
 
     if (hasLocation)
     {
-        oss
-            << info.advLatE6 << ", "
-            << info.advLonE6;
+        oss << info.advLatE6 << ", " << info.advLonE6;
     }
     else
     {
-        oss
-            << "NULL, "
-            << "NULL";
+        oss << "NULL, NULL";
     }
 
     oss
         << ") ON DUPLICATE KEY UPDATE "
+        << "node_id=VALUES(node_id), "
         << "advert_type=VALUES(advert_type), "
         << "advert_flags=VALUES(advert_flags), "
         << "name=VALUES(name), "
         << "public_key_hex=VALUES(public_key_hex), "
+        << "prefix6_hex=VALUES(prefix6_hex), "
         << "last_advert_at=VALUES(last_advert_at), "
         << "adv_lat_e6=VALUES(adv_lat_e6), "
         << "adv_lon_e6=VALUES(adv_lon_e6), "
@@ -826,22 +828,50 @@ bool MeshDB::UpsertNodeFromPushNewAdvert(const DataConnector::PushNewAdvertInfo&
         return true;
     }
 
+    const std::string publicKeyHex =
+        DataConnector::hexBytes(info.publicKey.data(), info.publicKey.size());
+
     const std::string prefix6Hex =
         DataConnector::hexBytes(info.prefix6.data(), info.prefix6.size());
-    const uint32_t lastAdvert = info.lastAdvert;
+
+    const bool hasLocation = (info.advLatE6 != 0) || (info.advLonE6 != 0);
 
     std::ostringstream oss;
 
     oss
-        << "INSERT INTO nodes (prefix6_hex, name, last_advert_at, last_mod_at) VALUES ("
-        << ToSqlString(prefix6Hex) << ", "
+        << "INSERT INTO nodes ("
+        << "node_id, advert_type, advert_flags, name, public_key_hex, prefix6_hex, last_advert_at, last_mod_at, adv_lat_e6, adv_lon_e6"
+        << ") VALUES ("
+        << info.nodeId << ", "
+        << unsigned(info.type) << ", "
+        << unsigned(info.flags) << ", "
         << ToSqlString(info.name) << ", "
-        << ToSqlDateTimeFromU32(lastAdvert) << ", "
-        << ToSqlDateTimeFromU32(info.lastMod)
+        << ToSqlString(publicKeyHex) << ", "
+        << ToSqlString(prefix6Hex) << ", "
+        << ToSqlDateTimeFromU32(info.lastAdvert) << ", "
+        << ToSqlDateTimeFromU32(info.lastMod) << ", ";
+
+    if (hasLocation)
+    {
+        oss << info.advLatE6 << ", " << info.advLonE6;
+    }
+    else
+    {
+        oss << "NULL, NULL";
+    }
+
+    oss
         << ") ON DUPLICATE KEY UPDATE "
+        << "node_id=VALUES(node_id), "
+        << "advert_type=VALUES(advert_type), "
+        << "advert_flags=VALUES(advert_flags), "
         << "name=VALUES(name), "
+        << "public_key_hex=VALUES(public_key_hex), "
+        << "prefix6_hex=VALUES(prefix6_hex), "
         << "last_advert_at=VALUES(last_advert_at), "
         << "last_mod_at=VALUES(last_mod_at), "
+        << "adv_lat_e6=VALUES(adv_lat_e6), "
+        << "adv_lon_e6=VALUES(adv_lon_e6), "
         << "updated_at=CURRENT_TIMESTAMP";
 
     return Execute(oss.str());

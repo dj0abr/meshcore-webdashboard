@@ -231,10 +231,16 @@ void PushRouter::HandleNewAdvert(const std::vector<uint8_t>& payload)
 
     if (info.valid)
     {
+        info.nodeId = rec.nodeId();
+        info.type = rec.type;
+        info.flags = rec.flags;
         info.name = rec.name;
+        info.publicKey = rec.publicKey;
         info.prefix6 = rec.prefix6();
         info.lastAdvert = rec.lastAdvert;
         info.lastMod = rec.lastMod;
+        info.advLatE6 = rec.advLatE6;
+        info.advLonE6 = rec.advLonE6;
     }
 
     DataConnector::Emit(info);
