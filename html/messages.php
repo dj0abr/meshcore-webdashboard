@@ -212,35 +212,40 @@ try
     if ($kind === 'channel')
     {
         $sql = "
-            SELECT
-                cm.id,
-                cm.timestamp_epoch,
-                cm.direction,
-                cm.chat_kind,
-                cm.name,
-                cm.room_sender_name,
-                cm.channel_idx,
-                cm.`text`,
-                cm.status,
-                cm.tx_outbox_id,
-                cm.sender_prefix6_hex,
-                cm.snr_db,
-                cm.path_len,
-                tx.status AS tx_status,
-                tx.retry_count,
-                tx.last_error,
-                tx.room_node_id,
-                tx.room_name,
-                tx.target_name,
-                tx.channel_name,
-                tx.channel_idx AS tx_channel_idx
-            FROM chat_messages cm
-            LEFT JOIN tx_outbox tx
-                ON tx.id = cm.tx_outbox_id
-            WHERE cm.chat_kind = 2
-            AND cm.channel_idx = ?
-            ORDER BY cm.timestamp_epoch ASC, cm.id ASC
-            LIMIT 1000
+            SELECT *
+            FROM
+            (
+                SELECT
+                    cm.id,
+                    cm.timestamp_epoch,
+                    cm.direction,
+                    cm.chat_kind,
+                    cm.name,
+                    cm.room_sender_name,
+                    cm.channel_idx,
+                    cm.`text`,
+                    cm.status,
+                    cm.tx_outbox_id,
+                    cm.sender_prefix6_hex,
+                    cm.snr_db,
+                    cm.path_len,
+                    tx.status AS tx_status,
+                    tx.retry_count,
+                    tx.last_error,
+                    tx.room_node_id,
+                    tx.room_name,
+                    tx.target_name,
+                    tx.channel_name,
+                    tx.channel_idx AS tx_channel_idx
+                FROM chat_messages cm
+                LEFT JOIN tx_outbox tx
+                    ON tx.id = cm.tx_outbox_id
+                WHERE cm.chat_kind = 2
+                AND cm.channel_idx = ?
+                ORDER BY cm.timestamp_epoch DESC, cm.id DESC
+                LIMIT 1000
+            ) AS recent
+            ORDER BY recent.timestamp_epoch ASC, recent.id ASC
         ";
 
         $stmt = $db->prepare($sql);
@@ -249,40 +254,46 @@ try
     else
     {
         $sql = "
-            SELECT
-                cm.id,
-                cm.timestamp_epoch,
-                cm.direction,
-                cm.chat_kind,
-                cm.name,
-                cm.room_sender_name,
-                cm.channel_idx,
-                cm.`text`,
-                cm.status,
-                cm.tx_outbox_id,
-                cm.sender_prefix6_hex,
-                cm.snr_db,
-                cm.path_len,
-                tx.status AS tx_status,
-                tx.retry_count,
-                tx.last_error,
-                tx.room_node_id,
-                tx.room_name,
-                tx.target_name,
-                tx.channel_name,
-                tx.channel_idx AS tx_channel_idx
-            FROM chat_messages cm
-            LEFT JOIN tx_outbox tx
-                ON tx.id = cm.tx_outbox_id
-            WHERE cm.chat_kind = ?
-            AND cm.name = ?
-            ORDER BY cm.timestamp_epoch ASC, cm.id ASC
-            LIMIT 1000
+            SELECT *
+            FROM
+            (
+                SELECT
+                    cm.id,
+                    cm.timestamp_epoch,
+                    cm.direction,
+                    cm.chat_kind,
+                    cm.name,
+                    cm.room_sender_name,
+                    cm.channel_idx,
+                    cm.`text`,
+                    cm.status,
+                    cm.tx_outbox_id,
+                    cm.sender_prefix6_hex,
+                    cm.snr_db,
+                    cm.path_len,
+                    tx.status AS tx_status,
+                    tx.retry_count,
+                    tx.last_error,
+                    tx.room_node_id,
+                    tx.room_name,
+                    tx.target_name,
+                    tx.channel_name,
+                    tx.channel_idx AS tx_channel_idx
+                FROM chat_messages cm
+                LEFT JOIN tx_outbox tx
+                    ON tx.id = cm.tx_outbox_id
+                WHERE cm.chat_kind = ?
+                AND cm.name = ?
+                ORDER BY cm.timestamp_epoch DESC, cm.id DESC
+                LIMIT 1000
+            ) AS recent
+            ORDER BY recent.timestamp_epoch ASC, recent.id ASC
         ";
 
         $stmt = $db->prepare($sql);
         $stmt->bind_param('is', $chatKind, $name);
     }
+
     $stmt->execute();
 
     $stmt->bind_result(
