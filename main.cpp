@@ -83,6 +83,10 @@ int main(int argc, char** argv)
 
     runtime.CheckAndApplyCompanionConfig(true);
 
+    /*runtime.CreatePublicChannel("abc123xyz");
+    runtime.CreatePublicChannel("#berlin");
+    runtime.CreatePrivateChannel("privat1", "00112233445566778899aabbccddeeff");*/
+
     while (mc.isConnected())
     {
         try

@@ -1,14 +1,59 @@
 #include "AppRuntime.h"
-
 #include "DataConnector.h"
 
 #include <ctime>
 #include <iostream>
 #include <chrono>
 #include <sstream>
+#include <iomanip>
+#include <algorithm>
+#include <cctype>
+#include <openssl/sha.h>
 
 static constexpr unsigned DISCOVER_COOLDOWN_SECONDS = 5;
 
+static int HexNibble(char c)
+{
+    if (c >= '0' && c <= '9')
+    {
+        return c - '0';
+    }
+
+    if (c >= 'a' && c <= 'f')
+    {
+        return 10 + (c - 'a');
+    }
+
+    if (c >= 'A' && c <= 'F')
+    {
+        return 10 + (c - 'A');
+    }
+
+    return -1;
+}
+
+static bool ParseHex16Local(const std::string& hex, std::array<uint8_t, 16>& out)
+{
+    if (hex.size() != 32)
+    {
+        return false;
+    }
+
+    for (size_t i = 0; i < 16; i++)
+    {
+        const int hi = HexNibble(hex[i * 2]);
+        const int lo = HexNibble(hex[i * 2 + 1]);
+
+        if (hi < 0 || lo < 0)
+        {
+            return false;
+        }
+
+        out[i] = static_cast<uint8_t>((hi << 4) | lo);
+    }
+
+    return true;
+}
 static std::string Hex8(const std::array<uint8_t, 8>& data)
 {
     static const char* hex = "0123456789ABCDEF";
@@ -24,10 +69,56 @@ static std::string Hex8(const std::array<uint8_t, 8>& data)
     return out;
 }
 
+static std::string Hex16(const std::array<uint8_t, 16>& data)
+{
+    static const char* hex = "0123456789abcdef";
+    std::string out;
+    out.reserve(32);
+
+    for (uint8_t b : data)
+    {
+        out.push_back(hex[(b >> 4) & 0x0F]);
+        out.push_back(hex[b & 0x0F]);
+    }
+
+    return out;
+}
+
+static std::string TrimCopy(const std::string& s)
+{
+    size_t start = 0;
+    while (start < s.size() && std::isspace(static_cast<unsigned char>(s[start])))
+    {
+        start++;
+    }
+
+    size_t end = s.size();
+    while (end > start && std::isspace(static_cast<unsigned char>(s[end - 1])))
+    {
+        end--;
+    }
+
+    return s.substr(start, end - start);
+}
+
+static bool IsAllZero16(const std::array<uint8_t, 16>& data)
+{
+    for (uint8_t b : data)
+    {
+        if (b != 0)
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+
 AppRuntime::AppRuntime(MeshCoreClient& client)
     : m_client(client)
     , m_syncContactsRequested(false)
     , m_syncContactsAt()
+    , m_nextChannelSyncPollAt(std::chrono::steady_clock::now())
 {
 }
 
@@ -69,8 +160,10 @@ bool AppRuntime::InitializeClient()
 void AppRuntime::StartupSync()
 {
     MeshDB::ClearNodesTable();
+    MeshDB::ClearChannelsTable();
     MeshDB::ClearTxBoxTable();
     SyncContacts();
+    SyncChannels();
 }
 
 void AppRuntime::Tick()
@@ -78,6 +171,12 @@ void AppRuntime::Tick()
     if (ShouldRunContactSync())
     {
         SyncContacts();
+    }
+
+    if (std::chrono::steady_clock::now() >= m_nextChannelSyncPollAt)
+    {
+        ProcessPendingChannelSync();
+        m_nextChannelSyncPollAt = std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
     }
 
     ProcessOutgoingQueue();
@@ -137,6 +236,61 @@ void AppRuntime::SyncContacts()
         adv.advLonE6 = p.advLonE6;
 
         DataConnector::Emit(adv);
+    }
+}
+
+void AppRuntime::SyncChannels()
+{
+    const uint8_t maxChannels = m_client.maxChannels();
+
+    std::cout << "[SYNC] channels max=" << unsigned(maxChannels) << "\n";
+
+    for (uint8_t idx = 0; idx < maxChannels; idx++)
+    {
+        auto info = m_client.getChannelInfo(idx);
+
+        if (!info.has_value())
+        {
+            std::cout << "[SYNC] getChannelInfo(" << unsigned(idx) << ") failed\n";
+            continue;
+        }
+
+        if (info->isEmpty())
+        {
+            continue;
+        }
+
+        const bool isDefault = (idx == 0);
+        const bool enabled = true;
+
+        uint8_t joinMode = 0;
+
+        if (!info->name.empty() && (info->name[0] == '#'))
+        {
+            joinMode = 1;
+        }
+
+        const std::string keyHex = Hex16(info->secret);
+
+        if (!MeshDB::UpsertLocalChannel(
+            info->channelIdx,
+            info->name,
+            joinMode,
+            "",
+            keyHex,
+            enabled,
+            isDefault))
+        {
+            std::cout << "[SYNC] UpsertChannel(" << unsigned(idx) << ") failed\n";
+            continue;
+        }
+
+        std::cout
+            << "[SYNC] channel "
+            << unsigned(info->channelIdx)
+            << " name=\"" << info->name
+            << "\" key=" << keyHex
+            << "\n";
     }
 }
 
@@ -839,3 +993,373 @@ bool AppRuntime::ProcessSingleDiscoverJob(const MeshDB::DiscoverJob& job)
 
     return true;
 }
+
+bool AppRuntime::CreateOrUpdateChannel(
+    uint8_t channelIdx,
+    const std::string& name,
+    const std::array<uint8_t, 16>& secret,
+    uint8_t joinMode,
+    bool isDefault)
+{
+    const std::string cleanName = TrimCopy(name);
+
+    if (channelIdx >= m_client.maxChannels())
+    {
+        std::cout << "[CHANNEL] invalid idx " << unsigned(channelIdx) << "\n";
+        return false;
+    }
+
+    if (cleanName.empty())
+    {
+        std::cout << "[CHANNEL] name is empty\n";
+        return false;
+    }
+
+    if (IsAllZero16(secret))
+    {
+        std::cout << "[CHANNEL] secret is all zero\n";
+        return false;
+    }
+
+    if (!m_client.setChannel(channelIdx, cleanName, secret))
+    {
+        std::cout << "[CHANNEL] setChannel failed for idx " << unsigned(channelIdx) << "\n";
+        return false;
+    }
+
+    auto info = m_client.getChannelInfo(channelIdx);
+    if (!info.has_value())
+    {
+        std::cout << "[CHANNEL] verification getChannelInfo failed for idx " << unsigned(channelIdx) << "\n";
+        return false;
+    }
+
+    if (info->isEmpty())
+    {
+        std::cout << "[CHANNEL] verification returned empty slot for idx " << unsigned(channelIdx) << "\n";
+        return false;
+    }
+
+    const bool enabled = true;
+    const std::string keyHex = Hex16(info->secret);
+
+    if (!MeshDB::UpsertLocalChannel(
+            info->channelIdx,
+            info->name,
+            joinMode,
+            "",
+            keyHex,
+            enabled,
+            isDefault))
+    {
+        std::cout << "[CHANNEL] UpsertChannel failed for idx " << unsigned(channelIdx) << "\n";
+        return false;
+    }
+
+    std::cout
+        << "[CHANNEL] saved idx=" << unsigned(info->channelIdx)
+        << " name=\"" << info->name
+        << "\" key=" << keyHex
+        << "\n";
+
+    return true;
+}
+
+bool AppRuntime::RemoveChannel(uint8_t channelIdx)
+{
+    if (channelIdx >= m_client.maxChannels())
+    {
+        std::cout << "[CHANNEL] invalid idx " << unsigned(channelIdx) << "\n";
+        return false;
+    }
+
+    if (channelIdx == 0)
+    {
+        std::cout << "[CHANNEL] refusing to remove default channel 0\n";
+        return false;
+    }
+
+    if (!m_client.deleteChannel(channelIdx))
+    {
+        std::cout << "[CHANNEL] deleteChannel failed for idx " << unsigned(channelIdx) << "\n";
+        return false;
+    }
+
+    auto info = m_client.getChannelInfo(channelIdx);
+    if (!info.has_value())
+    {
+        std::cout << "[CHANNEL] verification getChannelInfo failed for idx " << unsigned(channelIdx) << "\n";
+        return false;
+    }
+
+    if (!info->isEmpty())
+    {
+        std::cout << "[CHANNEL] slot still not empty after delete for idx " << unsigned(channelIdx) << "\n";
+        return false;
+    }
+
+    if (!MeshDB::DeleteChannel(channelIdx))
+    {
+        std::cout << "[CHANNEL] DeleteChannel DB failed for idx " << unsigned(channelIdx) << "\n";
+        return false;
+    }
+
+    std::cout << "[CHANNEL] removed idx=" << unsigned(channelIdx) << "\n";
+    return true;
+}
+
+bool AppRuntime::ParseHex16(const std::string& hex, std::array<uint8_t, 16>& out)
+{
+    if (hex.size() != 32)
+    {
+        return false;
+    }
+
+    for (size_t i = 0; i < 16; i++)
+    {
+        const int hi = HexNibble(hex[i * 2]);
+        const int lo = HexNibble(hex[i * 2 + 1]);
+
+        if (hi < 0 || lo < 0)
+        {
+            return false;
+        }
+
+        out[i] = static_cast<uint8_t>((hi << 4) | lo);
+    }
+
+    return true;
+}
+
+std::array<uint8_t, 16> AppRuntime::DerivePublicChannelSecret(const std::string& name)
+{
+    std::array<uint8_t, 16> out {};
+    unsigned char digest[SHA256_DIGEST_LENGTH] = {0};
+
+    SHA256(
+        reinterpret_cast<const unsigned char*>(name.data()),
+        name.size(),
+        digest);
+
+    for (size_t i = 0; i < 16; i++)
+    {
+        out[i] = digest[i];
+    }
+
+    return out;
+}
+
+std::optional<uint8_t> AppRuntime::FindNextFreeChannelIdx()
+{
+    const uint8_t maxChannels = m_client.maxChannels();
+
+    for (uint8_t idx = 1; idx < maxChannels; idx++)
+    {
+        auto info = m_client.getChannelInfo(idx);
+        if (!info.has_value())
+        {
+            continue;
+        }
+
+        if (info->isEmpty())
+        {
+            return idx;
+        }
+    }
+
+    return std::nullopt;
+}
+
+bool AppRuntime::CreatePublicChannel(const std::string& name)
+{
+    const std::string cleanName = TrimCopy(name);
+
+    if (cleanName.empty())
+    {
+        std::cout << "[CHANNEL] public name is empty\n";
+        return false;
+    }
+
+    auto freeIdx = FindNextFreeChannelIdx();
+    if (!freeIdx.has_value())
+    {
+        std::cout << "[CHANNEL] no free channel slot\n";
+        return false;
+    }
+
+    const std::array<uint8_t, 16> secret = DerivePublicChannelSecret(cleanName);
+
+    const uint8_t joinMode = (!cleanName.empty() && cleanName[0] == '#') ? 1 : 0;
+    const bool isDefault = false;
+
+    return CreateOrUpdateChannel(*freeIdx, cleanName, secret, joinMode, isDefault);
+}
+
+bool AppRuntime::CreatePrivateChannel(const std::string& name, const std::string& secretHex)
+{
+    const std::string cleanName = TrimCopy(name);
+
+    if (cleanName.empty())
+    {
+        std::cout << "[CHANNEL] private name is empty\n";
+        return false;
+    }
+
+    std::array<uint8_t, 16> secret {};
+    if (!ParseHex16(secretHex, secret))
+    {
+        std::cout << "[CHANNEL] invalid private secret hex\n";
+        return false;
+    }
+
+    if (IsAllZero16(secret))
+    {
+        std::cout << "[CHANNEL] private secret must not be all zero\n";
+        return false;
+    }
+
+    auto freeIdx = FindNextFreeChannelIdx();
+    if (!freeIdx.has_value())
+    {
+        std::cout << "[CHANNEL] no free channel slot\n";
+        return false;
+    }
+
+    const uint8_t joinMode = 2;
+    const bool isDefault = false;
+
+    return CreateOrUpdateChannel(*freeIdx, cleanName, secret, joinMode, isDefault);
+}
+
+void AppRuntime::ProcessPendingChannelSync()
+{
+    const auto pending = MeshDB::ListPendingChannelSync();
+
+    for (const auto& rec : pending)
+    {
+        bool ok = false;
+
+        if (rec.syncAction == "delete")
+        {
+            ok = ApplyPendingChannelDelete(rec);
+        }
+        else
+        {
+            ok = ApplyPendingChannelUpsert(rec);
+        }
+
+        if (!ok)
+        {
+            // Fehler wurde in der jeweiligen Funktion schon markiert
+        }
+    }
+}
+
+bool AppRuntime::ApplyPendingChannelUpsert(const MeshDB::ChannelRecord& rec)
+{
+    std::cout
+        << "[CHANNEL] pending upsert idx=" << unsigned(rec.channelIdx)
+        << " name=\"" << rec.name
+        << "\" key=" << rec.keyHex
+        << "\n";
+
+    if (rec.channelIdx >= m_client.maxChannels())
+    {
+        std::cout << "[CHANNEL] upsert failed: channel idx out of range\n";
+        MeshDB::MarkChannelSyncError(rec.channelIdx, "channel idx out of range");
+        return false;
+    }
+
+    std::array<uint8_t, 16> secret {};
+
+    if (!ParseHex16Local(rec.keyHex, secret))
+    {
+        std::cout << "[CHANNEL] upsert failed: invalid key_hex \"" << rec.keyHex << "\"\n";
+        MeshDB::MarkChannelSyncError(rec.channelIdx, "invalid key_hex");
+        return false;
+    }
+
+    if (!m_client.setChannel(rec.channelIdx, rec.name, secret))
+    {
+        std::cout
+            << "[CHANNEL] upsert failed: setChannel failed for idx="
+            << unsigned(rec.channelIdx)
+            << " name=\"" << rec.name << "\"\n";
+
+        MeshDB::MarkChannelSyncError(rec.channelIdx, "setChannel failed");
+        return false;
+    }
+
+    auto info = m_client.getChannelInfo(rec.channelIdx);
+    if (!info.has_value())
+    {
+        std::cout << "[CHANNEL] upsert failed: getChannelInfo verify failed\n";
+        MeshDB::MarkChannelSyncError(rec.channelIdx, "getChannelInfo verify failed");
+        return false;
+    }
+
+    if (info->isEmpty())
+    {
+        std::cout << "[CHANNEL] upsert failed: verify returned empty slot\n";
+        MeshDB::MarkChannelSyncError(rec.channelIdx, "verify returned empty slot");
+        return false;
+    }
+
+    if (!MeshDB::UpsertLocalChannel(
+            info->channelIdx,
+            info->name,
+            rec.joinMode,
+            rec.passphrase,
+            Hex16(info->secret),
+            rec.enabled,
+            rec.isDefault))
+    {
+        std::cout << "[CHANNEL] upsert failed: db upsert after verify failed\n";
+        MeshDB::MarkChannelSyncError(rec.channelIdx, "db upsert after verify failed");
+        return false;
+    }
+
+    std::cout
+        << "[CHANNEL] synced upsert idx=" << unsigned(info->channelIdx)
+        << " name=\"" << info->name << "\"\n";
+
+    return true;
+}
+
+bool AppRuntime::ApplyPendingChannelDelete(const MeshDB::ChannelRecord& rec)
+{
+    if (rec.channelIdx == 0)
+    {
+        MeshDB::MarkChannelSyncError(rec.channelIdx, "refusing to delete default channel");
+        return false;
+    }
+
+    if (!m_client.deleteChannel(rec.channelIdx))
+    {
+        MeshDB::MarkChannelSyncError(rec.channelIdx, "deleteChannel failed");
+        return false;
+    }
+
+    auto info = m_client.getChannelInfo(rec.channelIdx);
+    if (!info.has_value())
+    {
+        MeshDB::MarkChannelSyncError(rec.channelIdx, "getChannelInfo verify failed");
+        return false;
+    }
+
+    if (!info->isEmpty())
+    {
+        MeshDB::MarkChannelSyncError(rec.channelIdx, "slot still not empty after delete");
+        return false;
+    }
+
+    if (!MeshDB::DeleteChannel(rec.channelIdx))
+    {
+        MeshDB::MarkChannelSyncError(rec.channelIdx, "db delete failed");
+        return false;
+    }
+
+    std::cout << "[CHANNEL] synced delete idx=" << unsigned(rec.channelIdx) << "\n";
+    return true;
+}
+

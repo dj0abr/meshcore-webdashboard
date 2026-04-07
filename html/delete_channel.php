@@ -45,10 +45,15 @@ try
 
     $db->set_charset('utf8mb4');
 
-    $stmt = $db->prepare('SELECT is_default FROM channels WHERE channel_idx = ? LIMIT 1');
+    $stmt = $db->prepare('
+        SELECT is_default, has_local_context
+        FROM channels
+        WHERE channel_idx = ?
+        LIMIT 1
+    ');
     $stmt->bind_param('i', $channelIdx);
     $stmt->execute();
-    $stmt->bind_result($isDefault);
+    $stmt->bind_result($isDefault, $hasLocalContext);
 
     $found = $stmt->fetch();
     $stmt->close();
@@ -63,18 +68,55 @@ try
         throw new RuntimeException('Der Default Channel kann nicht gelöscht werden.');
     }
 
-    $stmt = $db->prepare('DELETE FROM channels WHERE channel_idx = ? LIMIT 1');
-    $stmt->bind_param('i', $channelIdx);
-    $stmt->execute();
+    if ((int) $hasLocalContext !== 1)
+    {
+        $stmt = $db->prepare('
+            DELETE FROM channels
+            WHERE channel_idx = ?
+              AND has_local_context = 0
+            LIMIT 1
+        ');
+        $stmt->bind_param('i', $channelIdx);
+        $stmt->execute();
+        $deletedRows = $stmt->affected_rows;
+        $stmt->close();
 
-    $deletedRows = $stmt->affected_rows;
+        $db->close();
+
+        jsonResponse(
+            [
+                'success' => true,
+                'channel_idx' => $channelIdx,
+                'delete_requested' => false,
+                'deleted_local_record' => $deletedRows > 0
+            ]
+        );
+    }
+
+    $syncAction = 'delete';
+    $syncError = '';
+
+    $stmt = $db->prepare('
+        UPDATE channels
+        SET
+            sync_pending = 1,
+            sync_action = ?,
+            sync_error = ?
+        WHERE channel_idx = ?
+        LIMIT 1
+    ');
+    $stmt->bind_param('ssi', $syncAction, $syncError, $channelIdx);
+    $stmt->execute();
+    $updatedRows = $stmt->affected_rows;
     $stmt->close();
+
+    $db->close();
 
     jsonResponse(
         [
             'success' => true,
             'channel_idx' => $channelIdx,
-            'deleted' => $deletedRows > 0
+            'delete_requested' => $updatedRows > 0
         ]
     );
 }

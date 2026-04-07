@@ -31,6 +31,8 @@ namespace MeshCoreProto
     static constexpr uint8_t CMD_DEVICE_QUERY      = 22;
     static constexpr uint8_t CMD_SEND_LOGIN        = 26;
     static constexpr uint8_t CMD_SET_OTHER_PARAMS  = 38;
+    static constexpr uint8_t CMD_GET_CHANNEL_INFO   = 0x1F;
+    static constexpr uint8_t CMD_SET_CHANNEL        = 0x20;
     static constexpr uint8_t CMD_SEND_CONTROL_DATA = 0x37;
     static constexpr uint8_t CONTROL_OP_DISCOVER = 0x81;
 
@@ -49,6 +51,7 @@ namespace MeshCoreProto
     static constexpr uint8_t RESP_CODE_DEVICE_INFO         = 13;
     static constexpr uint8_t RESP_CODE_CONTACT_MSG_RECV_V3 = 16;
     static constexpr uint8_t RESP_CODE_CHANNEL_MSG_RECV_V3 = 17;
+    static constexpr uint8_t RESP_CODE_CHANNEL_INFO = 0x12;
 
     // Discover Responses
     static constexpr uint8_t DISCOVER_FILTER_CHAT = 0x01;

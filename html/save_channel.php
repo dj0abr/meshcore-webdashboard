@@ -39,9 +39,9 @@ function normalizeHexKey(string $hex): string
         throw new RuntimeException('Secret Key fehlt.');
     }
 
-    if (strlen($hex) !== 64)
+    if (strlen($hex) !== 32)
     {
-        throw new RuntimeException('Secret Key muss genau 64 Hex-Zeichen lang sein.');
+        throw new RuntimeException('Secret Key muss genau 32 Hex-Zeichen lang sein.');
     }
 
     return $hex;
@@ -49,18 +49,18 @@ function normalizeHexKey(string $hex): string
 
 function derivePublicKeyHex(string $name): string
 {
-    return strtoupper(hash('sha256', 'meshcore-public:' . $name));
+    return strtoupper(substr(hash('sha256', $name), 0, 32));
 }
 
 function deriveHashtagKeyHex(string $name): string
 {
-    return strtoupper(hash('sha256', 'meshcore-hashtag:' . $name));
+    return strtoupper(substr(hash('sha256', $name), 0, 32));
 }
 
 function findChannelByNameAndKey(mysqli $db, string $name, string $keyHex): ?array
 {
     $stmt = $db->prepare('
-        SELECT channel_idx, name, join_mode, enabled, is_default, is_observed
+        SELECT channel_idx, name, join_mode, enabled, is_default, is_observed, has_local_context
         FROM channels
         WHERE name = ? AND key_hex = ?
         LIMIT 1
@@ -78,7 +78,7 @@ function findChannelByNameAndKey(mysqli $db, string $name, string $keyHex): ?arr
 function findChannelByIdx(mysqli $db, int $channelIdx): ?array
 {
     $stmt = $db->prepare('
-        SELECT channel_idx, name, join_mode, enabled, is_default, is_observed
+        SELECT channel_idx, name, join_mode, enabled, is_default, is_observed, has_local_context
         FROM channels
         WHERE channel_idx = ?
         LIMIT 1
@@ -95,9 +95,15 @@ function findChannelByIdx(mysqli $db, int $channelIdx): ?array
 
 function findNextFreeChannelIdx(mysqli $db, int $start = 1): int
 {
-    for ($idx = $start; $idx <= 255; $idx++)
+    for ($idx = $start; $idx < 40; $idx++)
     {
-        $stmt = $db->prepare('SELECT channel_idx FROM channels WHERE channel_idx = ? LIMIT 1');
+        $stmt = $db->prepare('
+            SELECT channel_idx
+            FROM channels
+            WHERE channel_idx = ?
+              AND has_local_context = 1
+            LIMIT 1
+        ');
         $stmt->bind_param('i', $idx);
         $stmt->execute();
         $stmt->store_result();
@@ -121,8 +127,7 @@ function upsertChannel(
     int $joinMode,
     string $keyHex,
     bool $enabled,
-    bool $isDefault,
-    bool $isObserved
+    bool $isDefault
 ): void
 {
     $existing = findChannelByIdx($db, $channelIdx);
@@ -137,7 +142,10 @@ function upsertChannel(
                 key_hex = ?,
                 enabled = ?,
                 is_default = ?,
-                is_observed = ?,
+                has_local_context = 1,
+                sync_pending = 1,
+                sync_action = ?,
+                sync_error = ?,
                 last_seen_at = NOW()
             WHERE channel_idx = ?
             LIMIT 1
@@ -147,16 +155,18 @@ function upsertChannel(
 
         $enabledInt = $enabled ? 1 : 0;
         $isDefaultInt = $isDefault ? 1 : 0;
-        $isObservedInt = $isObserved ? 1 : 0;
+        $syncAction = 'upsert';
+        $syncError = '';
 
         $stmt->bind_param(
-            'sisiiii',
+            'sisiissi',
             $name,
             $joinMode,
             $keyHex,
             $enabledInt,
             $isDefaultInt,
-            $isObservedInt,
+            $syncAction,
+            $syncError,
             $channelIdx
         );
         $stmt->execute();
@@ -175,11 +185,15 @@ function upsertChannel(
             enabled,
             is_default,
             is_observed,
+            has_local_context,
+            sync_pending,
+            sync_action,
+            sync_error,
             last_seen_at
         )
         VALUES
         (
-            ?, ?, ?, NULL, ?, ?, ?, ?, NOW()
+            ?, ?, ?, NULL, ?, ?, ?, 0, 1, 1, ?, ?, NOW()
         )
     ';
 
@@ -187,17 +201,19 @@ function upsertChannel(
 
     $enabledInt = $enabled ? 1 : 0;
     $isDefaultInt = $isDefault ? 1 : 0;
-    $isObservedInt = $isObserved ? 1 : 0;
+    $syncAction = 'upsert';
+    $syncError = '';
 
     $stmt->bind_param(
-        'isisiii',
+        'isisiiss',
         $channelIdx,
         $name,
         $joinMode,
         $keyHex,
         $enabledInt,
         $isDefaultInt,
-        $isObservedInt
+        $syncAction,
+        $syncError
     );
     $stmt->execute();
     $stmt->close();
@@ -217,8 +233,7 @@ function ensurePublicChannel(mysqli $db): array
         $joinMode,
         $keyHex,
         true,
-        true,
-        false
+        true
     );
 
     return
@@ -228,7 +243,8 @@ function ensurePublicChannel(mysqli $db): array
         'name' => $name,
         'enabled' => true,
         'is_default' => true,
-        'is_observed' => false
+        'is_observed' => false,
+        'has_local_context' => true
     ];
 }
 
@@ -276,7 +292,7 @@ try
         {
             $channelName = normalizeChannelName($name);
             $joinMode = 2;
-            $keyHex = strtoupper(bin2hex(random_bytes(32)));
+            $keyHex = strtoupper(bin2hex(random_bytes(16)));
             $returnSecretKey = $keyHex;
 
             $existing = findChannelByNameAndKey($db, $channelName, $keyHex);
@@ -383,8 +399,7 @@ try
         $joinMode,
         $keyHex,
         true,
-        $isDefault,
-        false
+        $isDefault
     );
 
     jsonResponse(
@@ -397,7 +412,8 @@ try
                 'name' => $channelName,
                 'enabled' => true,
                 'is_default' => $isDefault,
-                'is_observed' => false
+                'is_observed' => false,
+                'has_local_context' => true
             ],
             'secret_key' => $returnSecretKey
         ]

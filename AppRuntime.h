@@ -29,9 +29,24 @@ public:
     void ProcessDiscoverQueue();
     bool ProcessSingleDiscoverJob(const MeshDB::DiscoverJob& job);
 
+    bool CreateOrUpdateChannel(
+        uint8_t channelIdx,
+        const std::string& name,
+        const std::array<uint8_t, 16>& secret,
+        uint8_t joinMode,
+        bool isDefault);
+
+    bool RemoveChannel(uint8_t channelIdx);
+
+    std::optional<uint8_t> FindNextFreeChannelIdx();
+
+    bool CreatePublicChannel(const std::string& name);
+    bool CreatePrivateChannel(const std::string& name, const std::string& secretHex);
+
 private:
     bool ShouldRunContactSync();
     void SyncContacts();
+    void SyncChannels();
 
     void ProcessOutgoingQueue();
     bool ProcessSingleOutgoingTx(const MeshDB::OutgoingTx& tx);
@@ -62,6 +77,9 @@ private:
                                             uint32_t retryDelaySec);
     bool ProcessChannelTx(const MeshDB::OutgoingTx& tx);
 
+    static bool ParseHex16(const std::string& hex, std::array<uint8_t, 16>& out);
+    static std::array<uint8_t, 16> DerivePublicChannelSecret(const std::string& name);  
+
     MeshCoreClient& m_client;
 
     std::mutex m_syncMutex;
@@ -69,4 +87,9 @@ private:
     std::chrono::steady_clock::time_point m_syncContactsAt;
 
     RoomAuthManager m_roomAuth;
+
+    void ProcessPendingChannelSync();
+    bool ApplyPendingChannelUpsert(const MeshDB::ChannelRecord& rec);
+    bool ApplyPendingChannelDelete(const MeshDB::ChannelRecord& rec);
+    std::chrono::steady_clock::time_point m_nextChannelSyncPollAt;
 };

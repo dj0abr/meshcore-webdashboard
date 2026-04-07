@@ -76,9 +76,12 @@ public:
         bool enabled = true;
         bool isDefault = false;
         bool isObserved = false;
+        bool hasLocalContext = false;
+        bool syncPending = false;
+        std::string syncAction;
+        std::string syncError;
         uint32_t lastSeenEpoch = 0;
-    };
-
+    };    
     struct CompanionConfig
     {
         std::string name;
@@ -202,21 +205,21 @@ public:
     static std::optional<std::string> FindRoomPassword(uint32_t roomNodeId);
     static bool DeleteRoomPassword(uint32_t roomNodeId);
 
-    static bool UpsertChannel(
-            uint8_t channelIdx,
-            const std::string& name,
-            uint8_t joinMode,
-            const std::string& passphrase,
-            const std::string& keyHex,
-            bool enabled,
-            bool isDefault,
-            bool isObserved);
+    static bool UpsertLocalChannel(
+        uint8_t channelIdx,
+        const std::string& name,
+        uint8_t joinMode,
+        const std::string& passphrase,
+        const std::string& keyHex,
+        bool enabled,
+        bool isDefault);
 
     static std::optional<ChannelRecord> FindChannelByIdx(uint8_t channelIdx);
     static std::vector<ChannelRecord> ListChannels(bool includeObserved);
     static bool MarkChannelObserved(uint8_t channelIdx);
     static bool MarkChannelObservedUnlocked(uint8_t channelIdx);
     static bool DeleteChannel(uint8_t channelIdx);
+    static bool ClearChannelsTable();
 
     static bool SaveCompanionConfig(
                 const std::string& name,
@@ -237,7 +240,11 @@ public:
     static bool HasRecentDiscoverJob(unsigned cooldownSeconds);
     static std::optional<DiscoverJob> FetchLatestQueuedDiscoverJob();
     static bool SkipOlderQueuedDiscoverJobs(unsigned long long keepJobId);
-
+    static std::string ResolveChannelDisplayName(uint8_t channelIdx);  
+    static std::vector<ChannelRecord> ListPendingChannelSync();
+    static bool MarkChannelSyncError(uint8_t channelIdx, const std::string& errorText);
+    static bool MarkChannelDeletePending(uint8_t channelIdx);
+    
 private:
 
     static bool ConnectServer();

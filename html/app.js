@@ -117,6 +117,77 @@ const icons =
     })
 };
 
+function formatMessageText(text)
+{
+    const escaped = escapeHtml(String(text || ""));
+
+    function countChar(value, ch)
+    {
+        let count = 0;
+        for (let i = 0; i < value.length; i++)
+        {
+            if (value[i] === ch)
+            {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    function makeLink(url, original)
+    {
+        return '<a href="' + url + '" target="_blank" rel="noopener noreferrer">' + original + '</a>';
+    }
+
+    const withLinks = escaped.replace(
+        /((https?:\/\/[^\s<]+)|(www\.[^\s<]+))/g,
+        function(match)
+        {
+            let url = match;
+            let trailing = "";
+
+            while (url.length > 0)
+            {
+                const lastChar = url[url.length - 1];
+
+                if (/[.,;:!?\]]/.test(lastChar))
+                {
+                    trailing = lastChar + trailing;
+                    url = url.slice(0, -1);
+                    continue;
+                }
+
+                if (lastChar === ")")
+                {
+                    const openCount = countChar(url, "(");
+                    const closeCount = countChar(url, ")");
+
+                    if (closeCount > openCount)
+                    {
+                        trailing = lastChar + trailing;
+                        url = url.slice(0, -1);
+                        continue;
+                    }
+                }
+
+                break;
+            }
+
+            let href = url;
+
+            // www. → automatisch https:// davor
+            if (href.startsWith("www."))
+            {
+                href = "https://" + href;
+            }
+
+            return makeLink(href, url) + trailing;
+        }
+    );
+
+    return withLinks.replace(/\r?\n/g, "<br>");
+}
+
 function normalizeGuiTimestamp(timestamp)
 {
     if (!timestamp || timestamp <= 0)
@@ -1614,7 +1685,7 @@ function renderOutgoingMessage(msg)
             : formatDateTime(msg.received_at)
     );
 
-    const textValue = escapeHtml(msg.text || msg.message_text || "");
+    const textValue = formatMessageText(msg.text || msg.message_text || "");
     const statusText = escapeHtml(String(msg.ui_status_text || tr("chat.status.pending", "Pending")));
     const statusClass = getOutgoingStatusClass(msg);
 
@@ -1632,6 +1703,90 @@ function renderOutgoingMessage(msg)
     `;
 }
 
+function extractReplyNameFromMessage(msg)
+{
+    const rawText = String(msg.text || msg.message_text || "").trim();
+
+    const match = rawText.match(/^([^:\n]{1,40}):\s+/);
+
+    if (!match)
+    {
+        return "";
+    }
+
+    return match[1].trim();
+}
+
+function insertReplyMention(name)
+{
+    if (!el.chatInput)
+    {
+        return;
+    }
+
+    const cleanName = String(name || "").trim();
+
+    if (cleanName === "")
+    {
+        return;
+    }
+
+    const mention = "@" + cleanName + ": ";
+
+    if ("value" in el.chatInput)
+    {
+        const currentValue = String(el.chatInput.value || "");
+
+        if (!currentValue.startsWith(mention))
+        {
+            el.chatInput.value = mention + currentValue;
+        }
+
+        el.chatInput.focus();
+
+        if (typeof el.chatInput.setSelectionRange === "function")
+        {
+            const pos = el.chatInput.value.length;
+            el.chatInput.setSelectionRange(pos, pos);
+        }
+
+        if (typeof el.chatInput.dispatchEvent === "function")
+        {
+            el.chatInput.dispatchEvent(new Event("input", { bubbles: true }));
+        }
+
+        return;
+    }
+
+    if (el.chatInput.isContentEditable)
+    {
+        const currentText = String(el.chatInput.textContent || "");
+
+        if (!currentText.startsWith(mention))
+        {
+            el.chatInput.textContent = mention + currentText;
+        }
+
+        el.chatInput.focus();
+
+        const selection = window.getSelection();
+
+        if (selection)
+        {
+            const range = document.createRange();
+            range.selectNodeContents(el.chatInput);
+            range.collapse(false);
+            selection.removeAllRanges();
+            selection.addRange(range);
+        }
+
+        if (typeof el.chatInput.dispatchEvent === "function")
+        {
+            el.chatInput.dispatchEvent(new Event("input", { bubbles: true }));
+        }
+    }
+}
+
 function renderIncomingMessage(msg)
 {
     const dateText = escapeHtml(
@@ -1640,7 +1795,7 @@ function renderIncomingMessage(msg)
             : formatDateTime(msg.received_at)
     );
 
-    const textValue = escapeHtml(msg.text || msg.message_text || "");
+    const textValue = formatMessageText(msg.text || msg.message_text || "");
     const snr = (msg.snr_db !== null && msg.snr_db !== undefined) ? `${msg.snr_db} dB` : "-";
     const path = (msg.path_len !== null && msg.path_len !== undefined) ? `${msg.path_len} Hop(s)` : "-";
 
@@ -1655,6 +1810,15 @@ function renderIncomingMessage(msg)
             ? `<div class="chat-room-sender"><strong>${escapeHtml(roomSenderName)}</strong></div>`
             : "";
 
+    const replyName = roomSenderName !== ""
+        ? roomSenderName
+        : extractReplyNameFromMessage(msg);
+
+    const replyButton =
+        replyName !== ""
+            ? `<button type="button" class="chat-reply-button" data-reply-name="${escapeHtml(replyName)}" title="${escapeHtml(tr("chat.reply_to", "Antwort an"))} ${escapeHtml(replyName)}">@</button>`
+            : "";
+
     return `
         <div class="chat-message">
             <div class="chat-message-header">
@@ -1663,6 +1827,7 @@ function renderIncomingMessage(msg)
                     <span>${escapeHtml(tr("chat.snr", "SNR"))}: ${escapeHtml(snr)}</span>
                     <span>${escapeHtml(tr("chat.path", "Path"))}: ${escapeHtml(path)}</span>
                 </div>
+                ${replyButton}
             </div>
             ${senderBlock}
             <div class="chat-message-text">${textValue}</div>
@@ -1677,7 +1842,7 @@ function renderChatMessages(messages)
         return;
     }
 
-    const shouldAutoScroll = isChatNearBottom();
+    //const shouldAutoScroll = isChatNearBottom();
     state.chatMessages = Array.isArray(messages) ? messages : [];
 
     if (state.chatMessages.length === 0)
@@ -1687,10 +1852,10 @@ function renderChatMessages(messages)
             escapeHtml(tr("chat.empty", "Keine Messages für diesen Eintrag gefunden.")) +
             '</div>';
 
-        if (shouldAutoScroll)
+        /*if (shouldAutoScroll)
         {
             scrollChatToBottom();
-        }
+        }*/
 
         return;
     }
@@ -1704,10 +1869,10 @@ function renderChatMessages(messages)
 
     el.chatBody.innerHTML = `<div class="chat-messages">${html}</div>`;
 
-    if (shouldAutoScroll)
+    /*if (shouldAutoScroll)
     {
         scrollChatToBottom();
-    }
+    }*/
 }
 
 async function loadChatMessages(row, keepScrollIfPossible = true)
@@ -1720,6 +1885,9 @@ async function loadChatMessages(row, keepScrollIfPossible = true)
     const chatName = row.name || getChatKindLabel(row);
     const chatKind = getChatKindValue(row);
     const wasNearBottom = isChatNearBottom();
+
+    const oldScrollTop = el.chatBody.scrollTop;
+    const oldScrollHeight = el.chatBody.scrollHeight;
 
     let url = "";
     if (chatKind === "channel")
@@ -1749,13 +1917,35 @@ async function loadChatMessages(row, keepScrollIfPossible = true)
     const newestId = messages.length > 0 ? Number(messages[messages.length - 1].id || 0) : 0;
     const hasNewMessages = newestId > state.chatLastMessageId;
 
+    const oldSerialized = JSON.stringify(state.chatMessages);
+    const newSerialized = JSON.stringify(messages);
+
+    if (oldSerialized === newSerialized)
+    {
+        return;
+    }
+
     renderChatMessages(messages);
     state.chatLastMessageId = newestId;
 
-    if (!keepScrollIfPossible || wasNearBottom || hasNewMessages)
+    requestAnimationFrame(function()
     {
-        scrollChatToBottom();
-    }
+        if (!keepScrollIfPossible)
+        {
+            scrollChatToBottom();
+            return;
+        }
+
+        if (wasNearBottom || hasNewMessages)
+        {
+            scrollChatToBottom();
+            return;
+        }
+
+        const newScrollHeight = el.chatBody.scrollHeight;
+        const heightDiff = newScrollHeight - oldScrollHeight;
+        el.chatBody.scrollTop = oldScrollTop + heightDiff;
+    });
 }
 
 function startCurrentChatRefresh()
@@ -2218,9 +2408,26 @@ function renderChannelsList()
 
     state.channels.sort(function(a, b)
     {
-        if (a.is_default) return -1;
-        if (b.is_default) return 1;
-        return a.name.localeCompare(b.name);
+        if (!!a.is_default !== !!b.is_default)
+        {
+            return a.is_default ? -1 : 1;
+        }
+
+        if (!!a.has_local_context !== !!b.has_local_context)
+        {
+            return a.has_local_context ? -1 : 1;
+        }
+
+        const nameA = String(a.name || "");
+        const nameB = String(b.name || "");
+        const byName = nameA.localeCompare(nameB, undefined, { sensitivity: "base" });
+
+        if (byName !== 0)
+        {
+            return byName;
+        }
+
+        return Number(a.channel_idx || 0) - Number(b.channel_idx || 0);
     });
 
     state.channels.forEach(function(channel)
@@ -2266,6 +2473,11 @@ function renderChannelsList()
             metaParts.push(tr("channel.meta.disabled", "disabled"));
         }
 
+        if (channel.has_local_context)
+        {
+            metaParts.push(tr("channel.meta.local", "local"));
+        }
+
         const metaEl = document.createElement("span");
         metaEl.className = "channel-item-meta";
         metaEl.textContent = metaParts.join(" • ");
@@ -2280,6 +2492,7 @@ function renderChannelsList()
                 channel_idx: channelIdx,
                 enabled: !!channel.enabled,
                 is_observed: !!channel.is_observed,
+                has_local_context: !!channel.has_local_context,
                 is_default: !!channel.is_default
             };
 
@@ -2336,12 +2549,12 @@ async function sendCurrentChatMessage()
             return;
         }
 
-        if (state.chatRow.is_observed)
+        if (!state.chatRow.has_local_context)
         {
             window.alert(
                 tr(
-                    "channel.send.observed_no_context",
-                    "Für diesen beobachteten Channel ist kein lokaler Sendekontext konfiguriert."
+                    "channel.send.no_local_context",
+                    "Für diesen Channel ist kein lokaler Sendekontext konfiguriert."
                 )
             );
             return;
@@ -2355,6 +2568,7 @@ async function sendCurrentChatMessage()
 
     setChatInputEnabled(false);
 
+    let sendSucceeded = false;
     try
     {
         const data = await fetchJson("send_message.php",
@@ -2375,6 +2589,7 @@ async function sendCurrentChatMessage()
         {
             startTxStatusPolling(data.id);
         }
+        sendSucceeded = true;
     }
     catch (error)
     {
@@ -2389,7 +2604,10 @@ async function sendCurrentChatMessage()
     {
         setChatInputEnabled(true);
         el.chatInput.focus();
-        scrollChatToBottom();
+        if (sendSucceeded)
+        {
+            scrollChatToBottom();
+        }
     }
 }
 
@@ -2691,6 +2909,7 @@ async function handleChannelDialogConfirm()
                 channel_idx: Number(result.channel.channel_idx || 0),
                 enabled: !!result.channel.enabled,
                 is_observed: !!result.channel.is_observed,
+                has_local_context: !!result.channel.has_local_context,
                 is_default: !!result.channel.is_default
             };
 
@@ -3129,6 +3348,22 @@ if (el.chatInput)
     });
 
     updateChatInputHighlight();
+}
+
+if (el.chatBody)
+{
+    el.chatBody.addEventListener("click", function(event)
+    {
+        const button = event.target.closest(".chat-reply-button");
+
+        if (!button)
+        {
+            return;
+        }
+
+        const name = button.getAttribute("data-reply-name") || "";
+        insertReplyMention(name);
+    });
 }
 
 if (el.chatSendButton)

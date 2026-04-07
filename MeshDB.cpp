@@ -516,6 +516,10 @@ bool MeshDB::EnsureSchema()
         "    enabled TINYINT(1) NOT NULL DEFAULT 1,"
         "    is_default TINYINT(1) NOT NULL DEFAULT 0,"
         "    is_observed TINYINT(1) NOT NULL DEFAULT 0,"
+        "    has_local_context TINYINT(1) NOT NULL DEFAULT 0,"
+        "    sync_pending TINYINT(1) NOT NULL DEFAULT 0,"
+        "    sync_action VARCHAR(16) NOT NULL DEFAULT '',"
+        "    sync_error VARCHAR(255) NOT NULL DEFAULT '',"
         "    last_seen_at DATETIME DEFAULT NULL,"
         "    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,"
         "    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,"
@@ -523,9 +527,12 @@ bool MeshDB::EnsureSchema()
         "    UNIQUE KEY uq_channels_idx (channel_idx),"
         "    KEY idx_channels_name (name),"
         "    KEY idx_channels_observed (is_observed),"
-        "    KEY idx_channels_enabled (enabled)"
+        "    KEY idx_channels_enabled (enabled),"
+        "    KEY idx_channels_sync_pending (sync_pending),"
+        "    KEY idx_channels_sync_action (sync_action),"
+        "    KEY idx_channels_local_context (has_local_context)"
         ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4";
-                
+        
         const char* sqlChatMessages =
             "CREATE TABLE IF NOT EXISTS chat_messages ("
             "    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,"
@@ -1811,6 +1818,7 @@ bool MeshDB::ClearAllTables()
         Execute("TRUNCATE TABLE events") &&
         Execute("TRUNCATE TABLE messages") &&
         Execute("TRUNCATE TABLE nodes") &&
+        Execute("TRUNCATE TABLE channels") &&
         Execute("TRUNCATE TABLE tx_outbox");
 
     Execute("SET FOREIGN_KEY_CHECKS = 1");
@@ -1998,10 +2006,12 @@ bool MeshDB::MarkChannelObservedUnlocked(uint8_t channelIdx)
 
     std::ostringstream sql;
     sql
-        << "INSERT INTO channels (channel_idx, name, is_observed, enabled, last_seen_at) VALUES ("
+        << "INSERT INTO channels ("
+        << "channel_idx, name, is_observed, has_local_context, enabled, last_seen_at"
+        << ") VALUES ("
         << unsigned(channelIdx) << ", "
         << ToSqlString("Channel " + std::to_string(unsigned(channelIdx))) << ", "
-        << "1, 0, NOW()) "
+        << "1, 0, 0, NOW()) "
         << "ON DUPLICATE KEY UPDATE "
         << "is_observed = 1, "
         << "last_seen_at = NOW()";
@@ -2015,15 +2025,14 @@ bool MeshDB::MarkChannelObserved(uint8_t channelIdx)
     return MarkChannelObservedUnlocked(channelIdx);
 }
 
-bool MeshDB::UpsertChannel(
+bool MeshDB::UpsertLocalChannel(
     uint8_t channelIdx,
     const std::string& name,
     uint8_t joinMode,
     const std::string& passphrase,
     const std::string& keyHex,
     bool enabled,
-    bool isDefault,
-    bool isObserved)
+    bool isDefault)
 {
     std::lock_guard<std::mutex> lock(s_mutex);
 
@@ -2036,7 +2045,9 @@ bool MeshDB::UpsertChannel(
     sql
         << "INSERT INTO channels ("
         << "channel_idx, name, join_mode, passphrase, key_hex, "
-        << "enabled, is_default, is_observed, last_seen_at"
+        << "enabled, is_default, is_observed, has_local_context, "
+        << "sync_pending, sync_action, sync_error, "
+        << "last_seen_at"
         << ") VALUES ("
         << unsigned(channelIdx) << ", "
         << ToSqlString(name) << ", "
@@ -2045,7 +2056,9 @@ bool MeshDB::UpsertChannel(
         << ToSqlNullableString(keyHex) << ", "
         << BoolToSql(enabled) << ", "
         << BoolToSql(isDefault) << ", "
-        << BoolToSql(isObserved) << ", "
+        << "0, "
+        << "1, "
+        << "0, '', '', "
         << "NOW()"
         << ") ON DUPLICATE KEY UPDATE "
         << "name = VALUES(name), "
@@ -2054,7 +2067,10 @@ bool MeshDB::UpsertChannel(
         << "key_hex = VALUES(key_hex), "
         << "enabled = VALUES(enabled), "
         << "is_default = VALUES(is_default), "
-        << "is_observed = VALUES(is_observed), "
+        << "has_local_context = 1, "
+        << "sync_pending = 0, "
+        << "sync_action = '', "
+        << "sync_error = '', "
         << "last_seen_at = NOW()";
 
     return Execute(sql.str());
@@ -2070,12 +2086,15 @@ std::optional<MeshDB::ChannelRecord> MeshDB::FindChannelByIdx(uint8_t channelIdx
     }
 
     std::ostringstream sql;
+
     sql
         << "SELECT channel_idx, name, join_mode, passphrase, key_hex, "
-        << "enabled, is_default, is_observed, UNIX_TIMESTAMP(last_seen_at) "
+        << "enabled, is_default, is_observed, has_local_context, "
+        << "sync_pending, sync_action, sync_error, "
+        << "UNIX_TIMESTAMP(last_seen_at) "
         << "FROM channels WHERE channel_idx = " << unsigned(channelIdx)
         << " LIMIT 1";
-
+        
     if (mysql_query(s_conn, sql.str().c_str()) != 0)
     {
         std::cerr << "MeshDB SQL error: " << mysql_error(s_conn) << "\n";
@@ -2106,7 +2125,11 @@ std::optional<MeshDB::ChannelRecord> MeshDB::FindChannelByIdx(uint8_t channelIdx
     rec.enabled = RowU8(row, 5) != 0;
     rec.isDefault = RowU8(row, 6) != 0;
     rec.isObserved = RowU8(row, 7) != 0;
-    rec.lastSeenEpoch = RowU32(row, 8);
+    rec.hasLocalContext = RowU8(row, 8) != 0;
+    rec.syncPending = RowU8(row, 9) != 0;
+    rec.syncAction = RowString(row, 10);
+    rec.syncError = RowString(row, 11);
+    rec.lastSeenEpoch = RowU32(row, 12);
 
     mysql_free_result(res);
     return rec;
@@ -2126,12 +2149,14 @@ std::vector<MeshDB::ChannelRecord> MeshDB::ListChannels(bool includeObserved)
     std::ostringstream sql;
     sql
         << "SELECT channel_idx, name, join_mode, passphrase, key_hex, "
-        << "enabled, is_default, is_observed, UNIX_TIMESTAMP(last_seen_at) "
+        << "enabled, is_default, is_observed, has_local_context, "
+        << "sync_pending, sync_action, sync_error, "
+        << "UNIX_TIMESTAMP(last_seen_at) "
         << "FROM channels ";
 
     if (!includeObserved)
     {
-        sql << "WHERE is_observed = 0 ";
+        sql << "WHERE has_local_context = 1 ";
     }
 
     sql << "ORDER BY channel_idx ASC";
@@ -2162,7 +2187,11 @@ std::vector<MeshDB::ChannelRecord> MeshDB::ListChannels(bool includeObserved)
         rec.enabled = RowU8(row, 5) != 0;
         rec.isDefault = RowU8(row, 6) != 0;
         rec.isObserved = RowU8(row, 7) != 0;
-        rec.lastSeenEpoch = RowU32(row, 8);
+        rec.hasLocalContext = RowU8(row, 8) != 0;
+        rec.syncPending = RowU8(row, 9) != 0;
+        rec.syncAction = RowString(row, 10);
+        rec.syncError = RowString(row, 11);
+        rec.lastSeenEpoch = RowU32(row, 12);
 
         out.push_back(std::move(rec));
     }
@@ -2180,12 +2209,31 @@ bool MeshDB::DeleteChannel(uint8_t channelIdx)
         return false;
     }
 
-    std::ostringstream sql;
-    sql
-        << "DELETE FROM channels WHERE channel_idx = "
+    std::ostringstream sql1;
+    sql1
+        << "UPDATE channels SET "
+        << "has_local_context = 0, "
+        << "enabled = 0, "
+        << "is_default = 0, "
+        << "sync_pending = 0, "
+        << "sync_action = '', "
+        << "sync_error = '' "
+        << "WHERE channel_idx = "
         << unsigned(channelIdx);
 
-    return Execute(sql.str());
+    if (!Execute(sql1.str()))
+    {
+        return false;
+    }
+
+    std::ostringstream sql2;
+    sql2
+        << "DELETE FROM channels "
+        << "WHERE channel_idx = " << unsigned(channelIdx)
+        << " AND has_local_context = 0"
+        << " AND is_observed = 0";
+
+    return Execute(sql2.str());
 }
 
 bool MeshDB::SaveCompanionConfig(
@@ -2732,4 +2780,132 @@ bool MeshDB::SkipOlderQueuedDiscoverJobs(
         << "AND id < " << keepJobId;
 
     return Execute(oss.str());
+}
+
+std::string MeshDB::ResolveChannelDisplayName(uint8_t channelIdx)
+{
+    if (auto rec = FindChannelByIdx(channelIdx); rec.has_value() && !rec->name.empty())
+    {
+        return rec->name;
+    }
+
+    if (channelIdx == 0)
+    {
+        return "Public";
+    }
+
+    return "Channel " + std::to_string(channelIdx);
+}
+
+std::vector<MeshDB::ChannelRecord> MeshDB::ListPendingChannelSync()
+{
+    std::vector<ChannelRecord> out;
+
+    std::lock_guard<std::mutex> lock(s_mutex);
+
+    if (!s_ready || (s_conn == nullptr))
+    {
+        return out;
+    }
+
+    const char* sql =
+        "SELECT channel_idx, name, join_mode, passphrase, key_hex, "
+        "enabled, is_default, is_observed, has_local_context, "
+        "sync_pending, sync_action, sync_error, "
+        "UNIX_TIMESTAMP(last_seen_at) "
+        "FROM channels "
+        "WHERE sync_pending = 1 "
+        "ORDER BY channel_idx ASC";
+
+    if (mysql_query(s_conn, sql) != 0)
+    {
+        std::cerr << "MeshDB SQL error: " << mysql_error(s_conn) << "\n";
+        return out;
+    }
+
+    MYSQL_RES* res = mysql_store_result(s_conn);
+
+    if (res == nullptr)
+    {
+        return out;
+    }
+
+    MYSQL_ROW row = nullptr;
+
+    while ((row = mysql_fetch_row(res)) != nullptr)
+    {
+        ChannelRecord rec {};
+        rec.channelIdx = RowU8(row, 0);
+        rec.name = RowString(row, 1);
+        rec.joinMode = RowU8(row, 2);
+        rec.passphrase = RowString(row, 3);
+        rec.keyHex = RowString(row, 4);
+        rec.enabled = RowU8(row, 5) != 0;
+        rec.isDefault = RowU8(row, 6) != 0;
+        rec.isObserved = RowU8(row, 7) != 0;
+        rec.hasLocalContext = RowU8(row, 8) != 0;
+        rec.syncPending = RowU8(row, 9) != 0;
+        rec.syncAction = RowString(row, 10);
+        rec.syncError = RowString(row, 11);
+        rec.lastSeenEpoch = RowU32(row, 12);
+
+        out.push_back(std::move(rec));
+    }
+
+    mysql_free_result(res);
+    return out;
+}
+
+bool MeshDB::MarkChannelSyncError(uint8_t channelIdx, const std::string& errorText)
+{
+    std::lock_guard<std::mutex> lock(s_mutex);
+
+    if (!s_ready || (s_conn == nullptr))
+    {
+        return false;
+    }
+
+    std::ostringstream sql;
+    sql
+        << "UPDATE channels SET "
+        << "sync_pending = 0, "
+        << "sync_action = '', "
+        << "sync_error = " << ToSqlString(errorText) << " "
+        << "WHERE channel_idx = " << unsigned(channelIdx)
+        << " LIMIT 1";
+
+    return Execute(sql.str());
+}
+
+bool MeshDB::MarkChannelDeletePending(uint8_t channelIdx)
+{
+    std::lock_guard<std::mutex> lock(s_mutex);
+
+    if (!s_ready || (s_conn == nullptr))
+    {
+        return false;
+    }
+
+    std::ostringstream sql;
+    sql
+        << "UPDATE channels SET "
+        << "sync_pending = 1, "
+        << "sync_action = 'delete', "
+        << "sync_error = '' "
+        << "WHERE channel_idx = " << unsigned(channelIdx)
+        << " LIMIT 1";
+
+    return Execute(sql.str());
+}
+
+bool MeshDB::ClearChannelsTable()
+{
+    std::lock_guard<std::mutex> lock(s_mutex);
+
+    if (!s_ready || (s_conn == nullptr))
+    {
+        return false;
+    }
+
+    return Execute("DELETE FROM channels");
 }

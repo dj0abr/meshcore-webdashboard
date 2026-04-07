@@ -4,7 +4,7 @@ CXX      := g++
 TARGET   := meshcore_api
 
 CXXFLAGS := -std=c++17 -O2 -Wall -Wextra -pedantic -pthread
-LDFLAGS  := -pthread -lmariadb
+LDFLAGS  := -pthread -lmariadb -lssl -lcrypto
 
 SRCS := $(wildcard *.cpp)
 OBJS := $(SRCS:.cpp=.o)

@@ -1,4 +1,5 @@
 #include "MeshCoreClient.h"
+#include "MeshDB.h"
 
 #include <chrono>
 #include <cmath>
@@ -9,6 +10,7 @@
 #include <iostream>
 #include <sstream>
 #include <iomanip>
+
 
 extern void debugPrintContactFrame(const std::vector<uint8_t>& frame);
 
@@ -677,6 +679,21 @@ bool MeshCoreClient::doHandshake()
         {
             return false;
         }
+
+        // RESP_CODE_DEVICE_INFO:
+        // [0] code
+        // [1] firmware_ver
+        // [2] max_contacts_div_2   (ver 3+)
+        // [3] max_channels         (ver 3+)
+        if (resp->size() >= 4)
+        {
+            const uint8_t reportedMaxChannels = (*resp)[3];
+
+            if (reportedMaxChannels > 0)
+            {
+                m_maxChannels = reportedMaxChannels;
+            }
+        }
     }
 
     // CMD_APP_START -> RESP_CODE_SELF_INFO
@@ -809,7 +826,7 @@ void MeshCoreClient::syncAllMessagesOnce()
         }
         else
         {
-            fromName = "public";
+            fromName = MeshDB::ResolveChannelDisplayName(msg.channelIdx);
         }
 
         MessageCallback mcb;
@@ -1240,6 +1257,115 @@ std::optional<MeshCoreClient::TxQueued> MeshCoreClient::sendChannelMessageEx(
     out.ack = 0;                  // Protokoll liefert keinen ACK-Code
     out.suggestedTimeoutMs = 0;   // Protokoll liefert keinen Timeout
     return out;
+}
+
+std::optional<MeshCoreClient::ChannelInfo> MeshCoreClient::getChannelInfo(uint8_t channelIdx)
+{
+    if (!isConnected())
+    {
+        return std::nullopt;
+    }
+
+    std::vector<uint8_t> cmd;
+    cmd.reserve(2);
+    cmd.push_back(MeshCoreProto::CMD_GET_CHANNEL_INFO);
+    cmd.push_back(channelIdx);
+
+    std::optional<std::vector<uint8_t>> resp;
+
+    {
+        std::lock_guard<std::mutex> apiLock(m_apiMutex);
+        resp = m_link.requestResponse(
+            cmd,
+            MeshCoreProto::RESP_CODE_CHANNEL_INFO,
+            3000);
+    }
+
+    if (!resp.has_value())
+    {
+        return std::nullopt;
+    }
+
+    const std::vector<uint8_t>& frame = *resp;
+
+    if (frame.size() < 2 + 16)
+    {
+        return std::nullopt;
+    }
+
+    ChannelInfo out {};
+    out.channelIdx = frame[1];
+
+    size_t secretOff = frame.size() - 16;
+
+    for (size_t i = 0; i < 16; i++)
+    {
+        out.secret[i] = frame[secretOff + i];
+    }
+
+    size_t nameOff = 2;
+    size_t nameMaxLen = secretOff - nameOff;
+
+    for (size_t i = 0; i < nameMaxLen; i++)
+    {
+        uint8_t c = frame[nameOff + i];
+
+        if (c == 0)
+        {
+            break;
+        }
+
+        out.name.push_back(static_cast<char>(c));
+    }
+
+    return out;
+}
+
+bool MeshCoreClient::setChannel(
+    uint8_t channelIdx,
+    const std::string& name,
+    const std::array<uint8_t, 16>& secret)
+{
+    if (!isConnected())
+    {
+        return false;
+    }
+
+    std::vector<uint8_t> cmd;
+    cmd.reserve(1 + 1 + 32 + 16);
+
+    cmd.push_back(MeshCoreProto::CMD_SET_CHANNEL);
+    cmd.push_back(channelIdx);
+
+    char nameBuf[32] = {0};
+    const size_t copyLen = std::min<size_t>(name.size(), sizeof(nameBuf) - 1);
+    std::memcpy(nameBuf, name.data(), copyLen);
+    cmd.insert(cmd.end(), nameBuf, nameBuf + sizeof(nameBuf));
+
+    cmd.insert(cmd.end(), secret.begin(), secret.end());
+
+    std::optional<std::vector<uint8_t>> resp;
+
+    {
+        std::lock_guard<std::mutex> apiLock(m_apiMutex);
+        resp = m_link.requestResponse(
+            cmd,
+            MeshCoreProto::RESP_CODE_OK,
+            3000);
+    }
+
+    return resp.has_value();
+}
+
+bool MeshCoreClient::deleteChannel(uint8_t channelIdx)
+{
+    std::array<uint8_t, 16> zeroSecret {};
+    return setChannel(channelIdx, "", zeroSecret);
+}
+
+uint8_t MeshCoreClient::maxChannels() const
+{
+    return m_maxChannels;
 }
 
 bool MeshCoreClient::setAdvertName(const std::string& name)

@@ -46,6 +46,30 @@ public:
         std::string text;
     };
 
+    struct ChannelInfo
+    {
+        uint8_t channelIdx = 0;
+        std::string name;
+        std::array<uint8_t, 16> secret {};
+        bool isEmpty() const
+        {
+            if (!name.empty())
+            {
+                return false;
+            }
+
+            for (uint8_t b : secret)
+            {
+                if (b != 0)
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+    };
+
     struct DiscoverResult
     {
         std::array<uint8_t, 8> nodeId {};
@@ -149,6 +173,17 @@ public:
         uint8_t attempt,
         uint32_t senderTimestamp);
 
+    std::optional<ChannelInfo> getChannelInfo(uint8_t channelIdx);
+
+    bool setChannel(
+        uint8_t channelIdx,
+        const std::string& name,
+        const std::array<uint8_t, 16>& secret);
+
+    bool deleteChannel(uint8_t channelIdx);
+
+    uint8_t maxChannels() const;
+
     std::optional<std::vector<uint8_t>> requestResponseAny(
         const std::vector<uint8_t> &cmdPayload,
         const std::vector<uint8_t> &wantedCodes,
@@ -156,6 +191,7 @@ public:
         
 private:
     std::atomic<bool> m_running;
+    uint8_t m_maxChannels = 40;
 
     // Link layer (Serial + RX thread + single outstanding requestResponse)
     MeshCoreLink m_link;

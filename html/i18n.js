@@ -64,6 +64,8 @@ const I18N =
         "channel.meta.disabled": "deaktiviert",
         "channel.send.disabled": "Dieser Kanal ist deaktiviert.",
         "channel.send.observed_no_context": "Für diesen beobachteten Kanal ist kein lokaler Sendekontext konfiguriert.",
+        "channel.meta.local": "konfiguriert",
+        "channel.send.no_local_context": "Für diesen Kanal ist kein lokaler Sendekontext konfiguriert.",
 
         "channel.action.create_private.title": "Privaten Kanal anlegen",
         "channel.action.create_private.subtitle": "Neuen privaten Kanal anlegen. Der Secret Key wird anschließend angezeigt.",
@@ -231,6 +233,9 @@ const I18N =
         "channel.meta.default": "default",
         "channel.meta.observed": "observed",
         "channel.meta.disabled": "disabled",
+        "channel.meta.local": "configured",
+        "channel.send.no_local_context": "No local sending context is configured for this channel.",
+
         "channel.send.disabled": "This channel is disabled.",
         "channel.send.observed_no_context": "No local sending context is configured for this observed channel.",
 
@@ -400,6 +405,9 @@ const I18N =
         "channel.meta.default": "predeterminado",
         "channel.meta.observed": "observado",
         "channel.meta.disabled": "desactivado",
+        "channel.meta.local": "configurado",
+        "channel.send.no_local_context": "No hay un contexto local de envío configurado para este canal.",
+
         "channel.send.disabled": "Este canal está desactivado.",
         "channel.send.observed_no_context": "No hay un contexto local de envío configurado para este canal observado.",
 
@@ -569,6 +577,9 @@ const I18N =
         "channel.meta.default": "par défaut",
         "channel.meta.observed": "observé",
         "channel.meta.disabled": "désactivé",
+        "channel.meta.local": "configuré",
+        "channel.send.no_local_context": "Aucun contexte local d’envoi n’est configuré pour ce canal.",
+
         "channel.send.disabled": "Ce canal est désactivé.",
         "channel.send.observed_no_context": "Aucun contexte local d’envoi n’est configuré pour ce canal observé.",
 
@@ -738,6 +749,8 @@ const I18N =
         "channel.meta.default": "predefinito",
         "channel.meta.observed": "osservato",
         "channel.meta.disabled": "disattivato",
+        "channel.meta.local": "configurato",
+        "channel.send.no_local_context": "Nessun contesto locale di invio è configurato per questo canale.",
         "channel.send.disabled": "Questo canale è disattivato.",
         "channel.send.observed_no_context": "Nessun contesto locale di invio è configurato per questo canale osservato.",
 
