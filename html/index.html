@@ -1182,60 +1182,6 @@
             min-height: 0;
         }
 
-        .chat-view.split-with-path-map .chat-view-body
-        {
-            flex: 0 0 var(--chat-path-top-height, 60%);
-            min-height: 120px;
-        }
-
-        .chat-view.split-with-path-map .chat-path-map-panel
-        {
-            display: flex !important;
-            flex: 1 1 auto;
-            min-height: 180px;
-        }
-
-        .chat-path-splitter
-        {
-            display: none;
-            flex: 0 0 8px;
-            cursor: row-resize;
-            position: relative;
-            background: transparent;
-        }
-
-        .chat-path-splitter::before
-        {
-            content: "";
-            position: absolute;
-            left: 12px;
-            right: 12px;
-            top: 50%;
-            height: 2px;
-            transform: translateY(-50%);
-            background: var(--border);
-            border-radius: 999px;
-        }
-
-        .chat-view.split-with-path-map .chat-path-splitter
-        {
-            display: block !important;
-        }
-
-        .chat-path-splitter:hover::before,
-        .chat-path-splitter.is-dragging::before
-        {
-            height: 3px;
-        }
-        .chat-path-map-panel
-        {
-            display: none;
-            flex-direction: column;
-            min-height: 0;
-            border-top: 1px solid var(--border);
-            background: #0b1220;
-        }
-
         .chat-path-map-header
         {
             display: flex;
@@ -1270,19 +1216,67 @@
             background: #0f172a;
         }
 
-        #chatPathMapClose
+        .chat-tabs-view
         {
-            background: transparent;
-            border: 1px solid var(--border);
-            color: var(--text);
-            border-radius: 6px;
-            padding: 2px 8px;
-            cursor: pointer;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
         }
 
-        #chatPathMapClose:hover
+        .chat-tabs-bar
         {
-            background: rgba(255,255,255,0.08);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 12px;
+            border-bottom: 1px solid var(--border);
+            background: rgba(255, 255, 255, 0.02);
+        }
+
+        .chat-tab-button
+        {
+            border: 1px solid var(--border);
+            background: transparent;
+            color: var(--text);
+            border-radius: 8px;
+            padding: 6px 12px;
+            cursor: pointer;
+            font-size: 13px;
+        }
+
+        .chat-tab-button:hover
+        {
+            background: rgba(255,255,255,0.06);
+        }
+
+        .chat-tab-button.active
+        {
+            background: var(--accent);
+            color: #fff;
+            border-color: var(--accent);
+        }
+
+        .chat-tab-panel
+        {
+            flex: 1;
+            min-height: 0;
+            display: none;
+        }
+
+        .chat-tab-panel.active
+        {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .chat-path-map-panel
+        {
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+            height: 100%;
+            background: #0b1220;
         }
 
         .path-distance-label div
@@ -1408,53 +1402,60 @@
             <div id="messagesPanelContent" class="panel-content">
                 <div id="mapView" class="map-frame" style="display:none;"></div>
 
-                <div id="chatView" class="chat-view" style="display:none;">
-                    <div class="chat-view-header">
-                        <strong id="chatTitle" data-i18n="chat.title.default">Chat</strong>
+                <div id="chatTabsView" class="chat-tabs-view" style="display:none;">
+                    <div class="chat-tabs-bar">
+                        <button id="tabMessagesViewBtn" class="chat-tab-button active" type="button">Messages</button>
+                        <button id="tabPathMapViewBtn" class="chat-tab-button" type="button">Path Map</button>
                     </div>
 
-                    <div id="chatBody" class="chat-view-body"></div>
+                    <div id="messagesTabView" class="chat-tab-panel active">
+                        <div id="chatView" class="chat-view">
+                            <div class="chat-view-header">
+                                <strong id="chatTitle" data-i18n="chat.title.default">Chat</strong>
+                            </div>
 
-                    <div class="chat-input-bar">
-                        <div
-                            id="chatInput"
-                            class="chat-input"
-                            contenteditable="true"
-                            role="textbox"
-                            aria-multiline="false"
-                            spellcheck="false"
-                            data-max-length="400"
-                            data-highlight-limit="60"
-                            data-i18n-placeholder="chat.input_placeholder"
-                            data-placeholder="Nachricht eingeben und Enter drücken ..."
-                        ></div>
-                        <button id="chatSendButton" class="chat-send-button" type="button" data-i18n="chat.send">Senden</button>
-                    </div>
+                            <div id="chatBody" class="chat-view-body"></div>
 
-                    <div id="chatPathSplitter" class="chat-path-splitter" style="display:none;" role="separator" aria-orientation="horizontal" title="Größe von Chat und Karte ändern"></div>
-
-                    <div id="chatPathMapPanel" class="chat-path-map-panel" style="display:none;">
-                        <div class="chat-path-map-header">
-                            <strong>Message Path</strong>
-
-                            <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
-                                <span id="chatPathMapInfo" class="chat-path-map-info"></span>
-
-                                <label class="path-map-toggle">
-                                    <input id="chatPathToggleNames" type="checkbox" checked>
-                                    <span>Namen</span>
-                                </label>
-
-                                <label class="path-map-toggle">
-                                    <input id="chatPathToggleDistances" type="checkbox" checked>
-                                    <span>Entfernung</span>
-                                </label>
-
-                                <button id="chatPathMapClose" type="button" title="Schließen">✕</button>
+                            <div class="chat-input-bar">
+                                <div
+                                    id="chatInput"
+                                    class="chat-input"
+                                    contenteditable="true"
+                                    role="textbox"
+                                    aria-multiline="false"
+                                    spellcheck="false"
+                                    data-max-length="400"
+                                    data-highlight-limit="60"
+                                    data-i18n-placeholder="chat.input_placeholder"
+                                    data-placeholder="Nachricht eingeben und Enter drücken ..."
+                                ></div>
+                                <button id="chatSendButton" class="chat-send-button" type="button" data-i18n="chat.send">Senden</button>
                             </div>
                         </div>
+                    </div>
 
-                        <div id="chatPathMap" class="chat-path-map"></div>
+                    <div id="pathMapTabView" class="chat-tab-panel">
+                        <div id="chatPathMapPanel" class="chat-path-map-panel">
+                            <div class="chat-path-map-header">
+                                <strong>Message Path</strong>
+
+                                <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+                                    <span id="chatPathMapInfo" class="chat-path-map-info"></span>
+
+                                    <label class="path-map-toggle">
+                                        <input id="chatPathToggleNames" type="checkbox" checked>
+                                        <span>Namen</span>
+                                    </label>
+
+                                    <label class="path-map-toggle">
+                                        <input id="chatPathToggleDistances" type="checkbox" checked>
+                                        <span>Entfernung</span>
+                                    </label>
+                                </div>
+                            </div>
+
+                            <div id="chatPathMap" class="chat-path-map"></div>
+                        </div>
                     </div>
                 </div>
 

@@ -10,6 +10,11 @@ const el =
     chatTitle: document.getElementById("chatTitle"),
     callsignFilter: document.getElementById("callsignFilter"),
     chatBody: document.getElementById("chatBody"),
+    chatTabsView: document.getElementById("chatTabsView"),
+    tabMessagesViewBtn: document.getElementById("tabMessagesViewBtn"),
+    tabPathMapViewBtn: document.getElementById("tabPathMapViewBtn"),
+    messagesTabView: document.getElementById("messagesTabView"),
+    pathMapTabView: document.getElementById("pathMapTabView"),
     allMapButton: document.getElementById("allMapButton"),
     mapView: document.getElementById("mapView"),
     chatInput: document.getElementById("chatInput"),
@@ -20,10 +25,6 @@ const el =
     chatPathMapInfo: document.getElementById("chatPathMapInfo"),
     chatPathToggleNames: document.getElementById("chatPathToggleNames"),
     chatPathToggleDistances: document.getElementById("chatPathToggleDistances"),
-    chatPathSplitter: document.getElementById("chatPathSplitter"),
-    chatPathSplitterDragOffset: 0,
-    chatPathSplitterDragStartY: 0,
-    chatPathSplitterDragStartTopPixels: 0,
     roomPasswordModal: document.getElementById("roomPasswordModal"),
     roomPasswordTitle: document.getElementById("roomPasswordTitle"),
     roomPasswordSubtitle: document.getElementById("roomPasswordSubtitle"),
@@ -83,8 +84,6 @@ const state =
     chatPathShowDistances: true,
     chatPathLastCorrelationKey: "",
     chatPathLastPreferredPath: null,
-    chatPathTopHeightPercent: 50,
-    chatPathSplitterDragging: false,
     autoZoom: true,
     rightView: "empty",
     chatRow: null,
@@ -102,6 +101,7 @@ const state =
     discoverModalOpen: false,
     discoverPending: false,
     discoverPendingJobId: null,
+    rightTab: "messages",
 };
 
 const icons =
@@ -147,127 +147,6 @@ function consoledebug()
     consoledebug(...arguments);
 }
 
-function applyChatPathSplitHeight()
-{
-    if (!el.chatView)
-    {
-        return;
-    }
-
-    const percent = Math.max(20, Math.min(80, Number(state.chatPathTopHeightPercent) || 60));
-    el.chatView.style.setProperty("--chat-path-top-height", `${percent}%`);
-}
-
-function beginChatPathSplitterDrag(event)
-{
-    if (!el.chatView || !el.chatPathMapPanel || el.chatPathMapPanel.style.display === "none")
-    {
-        return;
-    }
-
-    const rect = el.chatView.getBoundingClientRect();
-
-    if (!rect || rect.height <= 0)
-    {
-        return;
-    }
-
-    const chatHeader = el.chatView.querySelector(".chat-view-header");
-    const chatInputBar = el.chatView.querySelector(".chat-input-bar");
-
-    const headerHeight = chatHeader ? chatHeader.offsetHeight : 0;
-    const inputHeight = chatInputBar ? chatInputBar.offsetHeight : 0;
-    const splitterHeight = el.chatPathSplitter ? el.chatPathSplitter.offsetHeight : 8;
-
-    const availableHeight = rect.height - headerHeight - inputHeight - splitterHeight;
-
-    if (availableHeight <= 0)
-    {
-        return;
-    }
-
-    state.chatPathSplitterDragging = true;
-    state.chatPathSplitterDragStartY = event.clientY;
-    state.chatPathSplitterDragStartTopPixels = (Number(state.chatPathTopHeightPercent) || 60) / 100.0 * availableHeight;
-
-    el.chatPathSplitter?.classList.add("is-dragging");
-
-    event.preventDefault();
-}
-
-function updateChatPathSplitterDrag(clientY)
-{
-    if (!state.chatPathSplitterDragging || !el.chatView)
-    {
-        return;
-    }
-
-    const rect = el.chatView.getBoundingClientRect();
-
-    if (!rect || rect.height <= 0)
-    {
-        return;
-    }
-
-    const chatHeader = el.chatView.querySelector(".chat-view-header");
-    const chatInputBar = el.chatView.querySelector(".chat-input-bar");
-
-    const headerHeight = chatHeader ? chatHeader.offsetHeight : 0;
-    const inputHeight = chatInputBar ? chatInputBar.offsetHeight : 0;
-    const splitterHeight = el.chatPathSplitter ? el.chatPathSplitter.offsetHeight : 8;
-
-    const availableHeight = rect.height - headerHeight - inputHeight - splitterHeight;
-
-    if (availableHeight <= 0)
-    {
-        return;
-    }
-
-    const deltaY = clientY - state.chatPathSplitterDragStartY;
-    const topPixels = state.chatPathSplitterDragStartTopPixels + deltaY;
-
-    const minTop = 120;
-    const minBottom = 180;
-
-    const clampedTop = Math.max(minTop, Math.min(availableHeight - minBottom, topPixels));
-    const percent = (clampedTop / availableHeight) * 100.0;
-
-    state.chatPathTopHeightPercent = percent;
-    applyChatPathSplitHeight();
-
-    if (state.chatPathLeafletMap)
-    {
-        setTimeout(function()
-        {
-            state.chatPathLeafletMap.invalidateSize();
-        }, 0);
-    }
-}
-
-function endChatPathSplitterDrag()
-{
-    if (!state.chatPathSplitterDragging)
-    {
-        return;
-    }
-
-    state.chatPathSplitterDragging = false;
-    state.chatPathSplitterDragStartY = 0;
-    state.chatPathSplitterDragStartTopPixels = 0;
-
-    el.chatPathSplitter?.classList.remove("is-dragging");
-
-    if (state.chatPathLeafletMap)
-    {
-        setTimeout(function()
-        {
-            state.chatPathLeafletMap.invalidateSize();
-        }, 0);
-    }
-
-    localStorage.setItem("chatPathTopHeightPercent", String(state.chatPathTopHeightPercent));
-}
-
 function ensureChatPathMap()
 {
     if (!el.chatPathMap)
@@ -298,23 +177,6 @@ function ensureChatPathMap()
 
 function hideChatPathMap()
 {
-    if (el.chatPathMapPanel)
-    {
-        el.chatPathMapPanel.style.display = "none";
-    }
-
-    if (el.chatPathSplitter)
-    {
-        el.chatPathSplitter.style.display = "none";
-        el.chatPathSplitter.classList.remove("is-dragging");
-    }
-
-    if (el.chatView)
-    {
-        el.chatView.classList.remove("split-with-path-map");
-        el.chatView.style.removeProperty("--chat-path-top-height");
-    }
-
     if (el.chatPathMapInfo)
     {
         el.chatPathMapInfo.textContent = "";
@@ -327,7 +189,11 @@ function hideChatPathMap()
 
     state.chatPathLastCorrelationKey = "";
     state.chatPathLastPreferredPath = null;
-    state.chatPathSplitterDragging = false;
+
+    if (state.rightTab === "pathmap")
+    {
+        activateChatTab("messages");
+    }
 }
 
 function buildPreferredPathMapPoints(preferredPath)
@@ -384,9 +250,9 @@ function buildPreferredPathMapPoints(preferredPath)
     return points;
 }
 
-function showPreferredPathInChatMap(correlationKey, preferredPath)
+function showPreferredPathInPathMap(correlationKey, preferredPath)
 {
-    if (!el.chatView || !el.chatPathMapPanel || !el.chatPathMap)
+    if (!el.chatTabsView || !el.chatPathMapPanel || !el.chatPathMap)
     {
         return;
     }
@@ -396,7 +262,8 @@ function showPreferredPathInChatMap(correlationKey, preferredPath)
     state.chatPathLastCorrelationKey = correlationKey;
     state.chatPathLastPreferredPath = preferredPath;
 
-    if (points.length === 0)    {
+    if (points.length === 0)
+    {
         hideChatPathMap();
         return;
     }
@@ -488,15 +355,13 @@ function showPreferredPathInChatMap(correlationKey, preferredPath)
         el.chatPathMapInfo.textContent = `Key: ${correlationKey} | Path: ${pathText}`;
     }
 
-    el.chatView.classList.add("split-with-path-map");
-
-    if (el.chatPathSplitter)
+    if (el.chatTabsView)
     {
-        el.chatPathSplitter.style.display = "block";
+        el.chatTabsView.style.display = "flex";
     }
 
-    el.chatPathMapPanel.style.display = "flex";
-    applyChatPathSplitHeight();
+    state.rightView = "pathmap";
+    activateChatTab("pathmap");
 
     setTimeout(function()
     {
@@ -1228,6 +1093,39 @@ function stopTxPolling(txId)
     }
 }
 
+function activateChatTab(tabName)
+{
+    state.rightTab = tabName === "pathmap" ? "pathmap" : "messages";
+
+    if (el.messagesTabView)
+    {
+        el.messagesTabView.classList.toggle("active", state.rightTab === "messages");
+    }
+
+    if (el.pathMapTabView)
+    {
+        el.pathMapTabView.classList.toggle("active", state.rightTab === "pathmap");
+    }
+
+    if (el.tabMessagesViewBtn)
+    {
+        el.tabMessagesViewBtn.classList.toggle("active", state.rightTab === "messages");
+    }
+
+    if (el.tabPathMapViewBtn)
+    {
+        el.tabPathMapViewBtn.classList.toggle("active", state.rightTab === "pathmap");
+    }
+
+    if (state.rightTab === "pathmap" && state.chatPathLeafletMap)
+    {
+        setTimeout(function()
+        {
+            state.chatPathLeafletMap.invalidateSize();
+        }, 0);
+    }
+}
+
 function hideRightPanelViews()
 {
     if (el.mapView)
@@ -1235,9 +1133,9 @@ function hideRightPanelViews()
         el.mapView.style.display = "none";
     }
 
-    if (el.chatView)
+    if (el.chatTabsView)
     {
-        el.chatView.style.display = "none";
+        el.chatTabsView.style.display = "none";
     }
 
     if (el.mapEmpty)
@@ -2592,11 +2490,11 @@ function debugPrintPreferredResolvedPath(preferredPath)
         return;
     }
 
-    console.debug("PreferredResolvedPath (object):", preferredPath);
+    consoledebug("PreferredResolvedPath (object):", preferredPath);
 
     try
     {
-        console.debug(
+        consoledebug(
             "PreferredResolvedPath (pretty JSON):\n" +
             JSON.stringify(preferredPath/*, null, 2*/)
         );
@@ -2776,15 +2674,13 @@ async function handleMessagePathClick(correlationKey)
             all_paths: normalizedResolvedPaths,
             preferred_path: preferredResolvedPath
         };
-
         if (!preferredResolvedPath)
         {
             hideChatPathMap();
             return;
         }
-
         debugPrintPreferredResolvedPath(preferredResolvedPath);
-        showPreferredPathInChatMap(key, preferredResolvedPath);
+        showPreferredPathInPathMap(key, preferredResolvedPath);
     }
     catch (error)
     {
@@ -2911,7 +2807,11 @@ function startCurrentChatRefresh()
 
     state.chatRefreshTimer = setInterval(async function()
     {
-        if (!state.chatRow || !el.chatView || state.rightView !== "chat")
+        if (
+            !state.chatRow ||
+            !el.chatTabsView ||
+            (state.rightView !== "chat" && state.rightView !== "pathmap")
+        )
         {
             stopCurrentChatRefresh();
             return;
@@ -2950,7 +2850,13 @@ async function showChatForRow(row)
         '<div class="chat-empty">' +
         escapeHtml(tr("chat.loading", "Lade Messages ...")) +
         '</div>';
-    el.chatView.style.display = "flex";
+
+    if (el.chatTabsView)
+    {
+        el.chatTabsView.style.display = "flex";
+    }
+
+    activateChatTab("messages");
 
     try
     {
@@ -4339,18 +4245,13 @@ if (el.chatSendButton)
     });
 }
 
-document.getElementById("chatPathMapClose")?.addEventListener("click", function()
-{
-    hideChatPathMap();
-});
-
 el.chatPathToggleNames?.addEventListener("change", function()
 {
     state.chatPathShowNames = !!el.chatPathToggleNames.checked;
 
     if (state.chatPathLastPreferredPath)
     {
-        showPreferredPathInChatMap(
+        showPreferredPathInPathMap(
             state.chatPathLastCorrelationKey,
             state.chatPathLastPreferredPath
         );
@@ -4363,31 +4264,12 @@ el.chatPathToggleDistances?.addEventListener("change", function()
 
     if (state.chatPathLastPreferredPath)
     {
-        showPreferredPathInChatMap(
+        showPreferredPathInPathMap(
             state.chatPathLastCorrelationKey,
             state.chatPathLastPreferredPath
         );
     }
 });
-
-el.chatPathSplitter?.addEventListener("mousedown", beginChatPathSplitterDrag);
-
-document.addEventListener("mousemove", function(event)
-{
-    updateChatPathSplitterDrag(event.clientY);
-});
-
-document.addEventListener("mouseup", function()
-{
-    endChatPathSplitterDrag();
-});
-
-const savedChatPathTopHeightPercent = Number(localStorage.getItem("chatPathTopHeightPercent"));
-
-if (Number.isFinite(savedChatPathTopHeightPercent))
-{
-    state.chatPathTopHeightPercent = Math.max(20, Math.min(80, savedChatPathTopHeightPercent));
-}
 
 if (el.roomPasswordSaveButton)
 {
@@ -4559,6 +4441,28 @@ if (el.discoverCloseButton)
         await closeDiscoverDialog();
     });
 }
+
+el.tabMessagesViewBtn?.addEventListener("click", function()
+{
+    if (!state.chatRow)
+    {
+        return;
+    }
+
+    state.rightView = "chat";
+    activateChatTab("messages");
+});
+
+el.tabPathMapViewBtn?.addEventListener("click", function()
+{
+    if (!state.chatRow || !state.chatPathLastPreferredPath)
+    {
+        return;
+    }
+
+    state.rightView = "pathmap";
+    activateChatTab("pathmap");
+});
 
 setChatInputEnabled(false);
 showEmptyRightPanel();
