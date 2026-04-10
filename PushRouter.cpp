@@ -3,9 +3,14 @@
 #include "DataConnector.h"
 #include "MeshCoreProto.h"
 #include "MeshDB.h"
+#include "MeshRxLogDecoder.h"
+#include "MessageCorrelation.h"
 
 #include <array>
 #include <iostream>
+#include <sstream>
+#include <iomanip>
+#include <openssl/sha.h>
 
 PushRouter::PushRouter(MeshCoreClient& client, AppRuntime& runtime)
     : m_client(client)
@@ -24,6 +29,8 @@ void PushRouter::Attach()
 
 void PushRouter::HandlePush(uint8_t code, const std::vector<uint8_t>& payload)
 {
+    //printf("********************************* [HandlePush] code: %02X\n",code);
+
     switch (code)
     {
         case MeshCoreProto::PUSH_CODE_ADVERT:
@@ -62,7 +69,7 @@ void PushRouter::HandlePush(uint8_t code, const std::vector<uint8_t>& payload)
             return;
         }
 
-        case 0x88:
+        case MeshCoreProto::PUSH_CODE_RX_LOG_DATA:
         {
             HandleLogRxData(payload);
             return;
@@ -187,16 +194,122 @@ void PushRouter::HandleLoginFail(const std::vector<uint8_t>& payload)
 
 void PushRouter::HandleLogRxData(const std::vector<uint8_t>& payload)
 {
-    if (!m_client.isRxLogEnabled())
+    const MeshRxLogDecoder::DecodedPacket pkt =
+        MeshRxLogDecoder::Decode(payload);
+
+    // Pakete mit Payload Type 0 und 1 (REQ, RESPONSE) sind uninteressant
+    if(pkt.payloadType == 0 || pkt.payloadType == 1 || pkt.payloadType == 7)
+        return;
+
+    DataConnector::PushRxLogInfo info {};
+    info.valid = pkt.valid;
+    info.payloadLen = payload.size();
+
+    if (!pkt.valid)
     {
+        DataConnector::Emit(info);
         return;
     }
 
-    DataConnector::PushSimpleInfo info
+    info.pushCode = pkt.pushCode;
+    info.routeType = pkt.routeType;
+    info.payloadType = pkt.payloadType;
+    info.payloadVersion = pkt.payloadVersion;
+
+    info.snrDb = pkt.snrDb;
+    info.hasSnrDb = true;
+
+    info.rssiDbm = pkt.rssiDbm;
+    info.hasRssiDbm = true;
+
+    info.pathLen = pkt.pathLen;
+    info.hasPathLen = true;
+
+    info.pathHashSize = pkt.pathHashSize;
+    info.hasPathHashSize = true;
+
+    info.pktHash = pkt.pktHash;
+    info.hasPktHash = true;
+
+    info.rawHex = pkt.originalHex;
+    info.pathText = MeshRxLogDecoder::FormatPath(pkt);
+
+    if (pkt.grpTxtValid)
     {
-        "PUSH LOG_RX_DATA",
-        payload.size()
-    };
+        if (!pkt.grpResolvedChannelName.empty())
+        {
+            const auto channelRec = MeshDB::FindChannelByName(pkt.grpResolvedChannelName);
+
+            if (channelRec.has_value())
+            {
+                info.channelIdx = channelRec->channelIdx;
+                info.hasChannelIdx = true;
+            }
+        }
+
+        info.senderTimestamp = pkt.grpTimestamp;
+        info.hasSenderTimestamp = true;
+
+        info.txtType = pkt.grpTxtType;
+        info.hasTxtType = true;
+
+        info.messageText = pkt.grpText;
+        info.hasMessageText = true;
+
+        if (info.hasChannelIdx && info.hasSenderTimestamp && info.hasTxtType && info.hasMessageText)
+        {
+            info.correlationKey = MessageCorrelation::BuildKey(
+                info.channelIdx,
+                info.senderTimestamp,
+                info.txtType,
+                info.messageText);
+        }
+    }
+
+    if (pkt.advertValid)
+    {
+        info.hasAdvert = true;
+        info.advertValid = true;
+
+        if (!pkt.advertPublicKey.empty())
+        {
+            info.advertPublicKey = MeshRxLogDecoder::BytesToHex(pkt.advertPublicKey);
+            info.hasAdvertPublicKey = true;
+        }
+
+        info.advertTimestamp = pkt.advertTimestamp;
+        info.hasAdvertTimestamp = true;
+
+        info.advertRole = pkt.advertRole;
+        info.hasAdvertRole = true;
+
+        info.advertHasGps = pkt.advertHasGps;
+        info.hasAdvertHasGps = true;
+
+        info.advertHasBle = pkt.advertHasBle;
+        info.hasAdvertHasBle = true;
+
+        info.advertHasShortcut = pkt.advertHasShortcut;
+        info.hasAdvertHasShortcut = true;
+
+        info.advertHasName = pkt.advertHasName;
+        info.hasAdvertHasName = true;
+
+        if (pkt.advertLocationValid)
+        {
+            info.advertLatitudeE6 = pkt.advertLatitudeE6;
+            info.hasAdvertLatitudeE6 = true;
+
+            info.advertLongitudeE6 = pkt.advertLongitudeE6;
+            info.hasAdvertLongitudeE6 = true;
+        }
+
+        if (pkt.advertHasName && !pkt.advertName.empty())
+        {
+            info.advertName = pkt.advertName;
+            info.hasAdvertName = true;
+        }
+    }
 
     DataConnector::Emit(info);
 }

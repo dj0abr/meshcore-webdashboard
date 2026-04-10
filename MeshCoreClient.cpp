@@ -1,5 +1,6 @@
 #include "MeshCoreClient.h"
 #include "MeshDB.h"
+#include "MessageCorrelation.h"
 
 #include <chrono>
 #include <cmath>
@@ -13,6 +14,112 @@
 
 
 extern void debugPrintContactFrame(const std::vector<uint8_t>& frame);
+
+#include <iomanip>
+#include <iostream>
+#include <sstream>
+#include <cmath>
+
+namespace
+{
+    std::string BytesToHex(const std::vector<uint8_t>& data)
+    {
+        std::ostringstream oss;
+
+        for (uint8_t b : data)
+        {
+            oss << std::hex
+                << std::setw(2)
+                << std::setfill('0')
+                << static_cast<unsigned>(b);
+        }
+
+        return oss.str();
+    }
+
+    std::string Prefix6ToHex(const std::array<uint8_t, 6>& pfx)
+    {
+        std::ostringstream oss;
+
+        for (uint8_t b : pfx)
+        {
+            oss << std::hex
+                << std::setw(2)
+                << std::setfill('0')
+                << static_cast<unsigned>(b);
+        }
+
+        return oss.str();
+    }
+
+    const char* RespCodeToString(uint8_t code)
+    {
+        switch (code)
+        {
+            case MeshCoreProto::RESP_CODE_CONTACT_MSG_RECV_V3:
+                return "RESP_CODE_CONTACT_MSG_RECV_V3";
+
+            case MeshCoreProto::RESP_CODE_CONTACT_MSG_RECV:
+                return "RESP_CODE_CONTACT_MSG_RECV";
+
+            case MeshCoreProto::RESP_CODE_CHANNEL_MSG_RECV_V3:
+                return "RESP_CODE_CHANNEL_MSG_RECV_V3";
+
+            case MeshCoreProto::RESP_CODE_CHANNEL_MSG_RECV:
+                return "RESP_CODE_CHANNEL_MSG_RECV";
+
+            case MeshCoreProto::RESP_CODE_NO_MORE_MESSAGES:
+                return "RESP_CODE_NO_MORE_MESSAGES";
+
+            default:
+                return "UNKNOWN";
+        }
+    }
+
+    void DumpFrameBytes(const std::vector<uint8_t>& frame)
+    {
+        std::cout << "  bytes[" << frame.size() << "] :";
+
+        for (size_t i = 0; i < frame.size(); ++i)
+        {
+            if ((i % 16) == 0)
+            {
+                std::cout << "\n    ";
+            }
+
+            std::cout << std::hex
+                << std::setw(2)
+                << std::setfill('0')
+                << static_cast<unsigned>(frame[i])
+                << " ";
+        }
+
+        std::cout << std::dec << "\n";
+    }
+
+    void DumpDecodedMessage(const MeshCoreClient::RxMessage& m)
+    {
+        std::cout << "  decoded:\n";
+        std::cout << "    isChannel       : " << (m.isChannel ? 1 : 0) << "\n";
+        std::cout << "    channelIdx      : " << static_cast<unsigned>(m.channelIdx) << "\n";
+        std::cout << "    txtType         : " << static_cast<unsigned>(m.txtType) << "\n";
+        std::cout << "    pathLen         : " << static_cast<unsigned>(m.pathLen) << "\n";
+
+        if (std::isnan(m.snrDb))
+        {
+            std::cout << "    snrDb           : NaN\n";
+        }
+        else
+        {
+            std::cout << "    snrDb           : " << m.snrDb << "\n";
+        }
+
+        std::cout << "    senderTimestamp : " << m.senderTimestamp << "\n";
+        std::cout << "    senderPrefix6   : " << Prefix6ToHex(m.senderPrefix6) << "\n";
+        std::cout << "    textLen         : " << m.text.size() << "\n";
+        std::cout << "    text            : [" << m.text << "]\n";
+    }
+}
 
 static bool ShouldReplaceDiscoverResult(
     const MeshCoreClient::DiscoverResult& oldValue,
@@ -795,18 +902,33 @@ void MeshCoreClient::syncAllMessagesOnce()
 
         if (!resp.has_value())
         {
+            //std::cout << "[MSGSYNC] no response\n";
             return;
         }
 
         if (resp->empty())
         {
+            //std::cout << "[MSGSYNC] empty response\n";
             return;
         }
 
         const uint8_t code = (*resp)[0];
 
+        /*std::cout << "[MSGSYNC] raw message frame\n";
+        std::cout << "  code             : 0x"
+                  << std::hex
+                  << std::setw(2)
+                  << std::setfill('0')
+                  << static_cast<unsigned>(code)
+                  << std::dec
+                  << " (" << RespCodeToString(code) << ")\n";
+        std::cout << "  frameLen         : " << resp->size() << "\n";
+        std::cout << "  frameHex         : " << BytesToHex(*resp) << "\n";
+        DumpFrameBytes(*resp);*/
+
         if (code == MeshCoreProto::RESP_CODE_NO_MORE_MESSAGES)
         {
+            //std::cout << "[MSGSYNC] no more messages\n";
             return;
         }
 
@@ -814,10 +936,14 @@ void MeshCoreClient::syncAllMessagesOnce()
 
         if (!msgOpt.has_value())
         {
+            std::cout << "[MSGSYNC] decodeRxMessage failed\n";
             continue;
         }
 
         RxMessage msg = *msgOpt;
+
+        //std::cout << "[MSGSYNC] decoded message summary\n";
+        //DumpDecodedMessage(msg);
 
         std::string fromName;
         if (!msg.isChannel)
@@ -829,6 +955,8 @@ void MeshCoreClient::syncAllMessagesOnce()
             fromName = MeshDB::ResolveChannelDisplayName(msg.channelIdx);
         }
 
+        //std::cout << "  resolvedFromName : [" << fromName << "]\n";
+
         MessageCallback mcb;
         {
             std::lock_guard<std::mutex> lock(m_cbMutex);
@@ -837,11 +965,9 @@ void MeshCoreClient::syncAllMessagesOnce()
 
         if (!mcb)
         {
-            //std::cout << "[SYNC] message callback not set\n";
         }
         else
         {
-            //std::cout << "[SYNC] invoking message callback, fromName=[" << fromName << "]\n";
             mcb(msg, fromName);
         }
     }
@@ -853,14 +979,18 @@ std::optional<MeshCoreClient::RxMessage> MeshCoreClient::decodeRxMessage(const s
     {
         return std::nullopt;
     }
-         
-    uint8_t code = frame[0];
+
+    const uint8_t code = frame[0];
 
     RxMessage m {};
     m.snrDb = std::nanf("");
+    m.respCode = code;
+    m.rawFrame = frame;
 
     if (code == MeshCoreProto::RESP_CODE_CONTACT_MSG_RECV)
     {
+        std::cout << "[decodeRxMessage] CONTACT_MSG_RECV legacy\n";
+
         if (frame.size() < 1 + 6 + 1 + 1 + 4)
         {
             return std::nullopt;
@@ -868,7 +998,7 @@ std::optional<MeshCoreClient::RxMessage> MeshCoreClient::decodeRxMessage(const s
 
         m.isChannel = false;
 
-        for (size_t i = 0; i < 6; i++)
+        for (size_t i = 0; i < 6; ++i)
         {
             m.senderPrefix6[i] = frame[1 + i];
         }
@@ -877,7 +1007,7 @@ std::optional<MeshCoreClient::RxMessage> MeshCoreClient::decodeRxMessage(const s
         m.txtType = frame[1 + 6 + 1];
         m.senderTimestamp = le32(frame.data() + (1 + 6 + 1 + 1));
 
-        size_t textOff = 1 + 6 + 1 + 1 + 4;
+        const size_t textOff = 1 + 6 + 1 + 1 + 4;
         m.text.assign(reinterpret_cast<const char *>(frame.data() + textOff), frame.size() - textOff);
 
         return m;
@@ -887,33 +1017,89 @@ std::optional<MeshCoreClient::RxMessage> MeshCoreClient::decodeRxMessage(const s
     {
         if (frame.size() < 1 + 1 + 2 + 6 + 1 + 1 + 4)
         {
+            std::cout << "[decodeRxMessage] CONTACT_MSG_RECV_V3 too short: " << frame.size() << "\n";
             return std::nullopt;
         }
 
         m.isChannel = false;
 
-        int8_t snr4 = static_cast<int8_t>(frame[1]);
+        const uint8_t rawSnr = frame[1];
+        const int8_t snr4 = static_cast<int8_t>(rawSnr);
         m.snrDb = static_cast<float>(snr4) / 4.0f;
 
-        size_t pfxOff = 1 + 1 + 2;
+        /*std::cout << "[decodeRxMessage] CONTACT_MSG_RECV_V3\n";
+        std::cout << "  rawSnr           : 0x"
+                  << std::hex
+                  << std::setw(2)
+                  << std::setfill('0')
+                  << static_cast<unsigned>(rawSnr)
+                  << std::dec
+                  << " (" << static_cast<unsigned>(rawSnr) << ")\n";
+        std::cout << "  snr4             : " << static_cast<int>(snr4) << "\n";
+        std::cout << "  snrDb            : " << m.snrDb << "\n";
+        std::cout << "  reserved[2]      : "
+                  << std::hex
+                  << std::setw(2)
+                  << std::setfill('0')
+                  << static_cast<unsigned>(frame[2])
+                  << " "
+                  << std::setw(2)
+                  << std::setfill('0')
+                  << static_cast<unsigned>(frame[3])
+                  << std::dec
+                  << "\n";
+        */
 
-        for (size_t i = 0; i < 6; i++)
+        const size_t pfxOff = 1 + 1 + 2;
+
+        for (size_t i = 0; i < 6; ++i)
         {
             m.senderPrefix6[i] = frame[pfxOff + i];
         }
 
-        m.pathLen = frame[pfxOff + 6];
+        const uint8_t pathMeta = frame[pfxOff + 6];
+        m.pathLen = pathMeta & 0x3F;
+
+        uint8_t pathHashSizeCode = (pathMeta >> 6) & 0x03;
+        m.pathHashSize = static_cast<uint8_t>(pathHashSizeCode + 1);
+
         m.txtType = frame[pfxOff + 6 + 1];
         m.senderTimestamp = le32(frame.data() + (pfxOff + 6 + 1 + 1));
 
-        size_t textOff = pfxOff + 6 + 1 + 1 + 4;
+        const size_t textOff = pfxOff + 6 + 1 + 1 + 4;
         m.text.assign(reinterpret_cast<const char *>(frame.data() + textOff), frame.size() - textOff);
 
+        /*std::cout << "  senderPrefix6    : ";
+        for (size_t i = 0; i < 6; ++i)
+        {
+            std::cout << std::hex
+                      << std::setw(2)
+                      << std::setfill('0')
+                      << static_cast<unsigned>(m.senderPrefix6[i]);
+        }
+        std::cout << std::dec << "\n";
+
+        std::cout << "  pathMeta         : 0x"
+                  << std::hex
+                  << std::setw(2)
+                  << std::setfill('0')
+                  << static_cast<unsigned>(pathMeta)
+                  << std::dec
+                  << " (" << static_cast<unsigned>(pathMeta) << ")\n";
+        std::cout << "  pathLen          : " << static_cast<unsigned>(m.pathLen) << "\n";
+        std::cout << "  pathHashSizeCode : " << static_cast<unsigned>((pathMeta >> 6) & 0x03) << "\n";
+        std::cout << "  pathHashSize     : " << static_cast<unsigned>(((pathMeta >> 6) & 0x03) + 1) << "\n";
+        std::cout << "  txtType          : " << static_cast<unsigned>(m.txtType) << "\n";
+        std::cout << "  senderTimestamp  : " << m.senderTimestamp << "\n";
+        std::cout << "  textLen          : " << m.text.size() << "\n";
+        */
         return m;
     }
 
     if (code == MeshCoreProto::RESP_CODE_CHANNEL_MSG_RECV)
     {
+        std::cout << "[decodeRxMessage] CHANNEL_MSG_RECV legacy\n";
+
         if (frame.size() < 1 + 1 + 1 + 1 + 4)
         {
             return std::nullopt;
@@ -925,7 +1111,7 @@ std::optional<MeshCoreClient::RxMessage> MeshCoreClient::decodeRxMessage(const s
         m.txtType = frame[3];
         m.senderTimestamp = le32(frame.data() + 4);
 
-        size_t textOff = 1 + 1 + 1 + 1 + 4;
+        const size_t textOff = 1 + 1 + 1 + 1 + 4;
         m.text.assign(reinterpret_cast<const char *>(frame.data() + textOff), frame.size() - textOff);
 
         return m;
@@ -935,30 +1121,76 @@ std::optional<MeshCoreClient::RxMessage> MeshCoreClient::decodeRxMessage(const s
     {
         if (frame.size() < 1 + 1 + 2 + 1 + 1 + 1 + 4)
         {
+            std::cout << "[decodeRxMessage] CHANNEL_MSG_RECV_V3 too short: "
+                      << frame.size() << "\n";
             return std::nullopt;
         }
 
         m.isChannel = true;
 
-        int8_t snr4 = static_cast<int8_t>(frame[1]);
+        const uint8_t rawSnr = frame[1];
+        const int8_t snr4 = static_cast<int8_t>(rawSnr);
         m.snrDb = static_cast<float>(snr4) / 4.0f;
-
-        size_t off = 1 + 1 + 2;
+/*
+        std::cout << "[decodeRxMessage] CHANNEL_MSG_RECV_V3\n";
+        std::cout << "  rawSnr           : 0x"
+                  << std::hex
+                  << std::setw(2)
+                  << std::setfill('0')
+                  << static_cast<unsigned>(rawSnr)
+                  << std::dec
+                  << " (" << static_cast<unsigned>(rawSnr) << ")\n";
+        std::cout << "  snr4             : " << static_cast<int>(snr4) << "\n";
+        std::cout << "  snrDb            : " << m.snrDb << "\n";
+        std::cout << "  reserved[2]      : "
+                  << std::hex
+                  << std::setw(2)
+                  << std::setfill('0')
+                  << static_cast<unsigned>(frame[2])
+                  << " "
+                  << std::setw(2)
+                  << std::setfill('0')
+                  << static_cast<unsigned>(frame[3])
+                  << std::dec
+                  << "\n";
+*/
+        const size_t off = 1 + 1 + 2;
 
         m.channelIdx = frame[off + 0];
-        m.pathLen = frame[off + 1];
+
+        const uint8_t pathMeta = frame[off + 1];
+        m.pathLen = pathMeta & 0x3F;
+
+        // Optional, falls im Struct vorhanden:
+        uint8_t pathHashSizeCode = (pathMeta >> 6) & 0x03;
+        m.pathHashSize = static_cast<uint8_t>(pathHashSizeCode + 1);
+
         m.txtType = frame[off + 2];
         m.senderTimestamp = le32(frame.data() + (off + 3));
 
-        size_t textOff = off + 3 + 4;
+        const size_t textOff = off + 3 + 4;
         m.text.assign(reinterpret_cast<const char *>(frame.data() + textOff), frame.size() - textOff);
-
+/*
+        std::cout << "  channelIdx       : " << static_cast<unsigned>(m.channelIdx) << "\n";
+        std::cout << "  pathMeta         : 0x"
+                  << std::hex
+                  << std::setw(2)
+                  << std::setfill('0')
+                  << static_cast<unsigned>(pathMeta)
+                  << std::dec
+                  << " (" << static_cast<unsigned>(pathMeta) << ")\n";
+        std::cout << "  pathLen          : " << static_cast<unsigned>(m.pathLen) << "\n";
+        std::cout << "  pathHashSizeCode : " << static_cast<unsigned>((pathMeta >> 6) & 0x03) << "\n";
+        std::cout << "  pathHashSize     : " << static_cast<unsigned>(((pathMeta >> 6) & 0x03) + 1) << "\n";
+        std::cout << "  txtType          : " << static_cast<unsigned>(m.txtType) << "\n";
+        std::cout << "  senderTimestamp  : " << m.senderTimestamp << "\n";
+        std::cout << "  textLen          : " << m.text.size() << "\n";
+*/
         return m;
     }
 
     return std::nullopt;
 }
-
 void MeshCoreClient::onLinkFrame(uint8_t code, const std::vector<uint8_t> &payload)
 {
     // 1a) contact-stream capture for listPeers()
@@ -978,7 +1210,7 @@ void MeshCoreClient::onLinkFrame(uint8_t code, const std::vector<uint8_t> &paylo
         std::lock_guard<std::mutex> lock(m_discoverMutex);
 
         if (m_discoverCapture.active &&
-            (code == 0x88 || code == MeshCoreProto::PUSH_CODE_CONTROL_DATA))
+            (code == MeshCoreProto::PUSH_CODE_RX_LOG_DATA || code == MeshCoreProto::PUSH_CODE_CONTROL_DATA))
         {
             MeshCoreProto::DiscoverNode dn {};
 
@@ -1094,16 +1326,6 @@ uint32_t MeshCoreClient::be32(const uint8_t *p)
 uint32_t MeshCoreClient::nowUtcEpoch()
 {
     return static_cast<uint32_t>(::time(nullptr));
-}
-
-void MeshCoreClient::setEnableRxLog(bool enable)
-{
-    m_enableRxLog.store(enable);
-}
-
-bool MeshCoreClient::isRxLogEnabled() const
-{
-    return m_enableRxLog.load();
 }
 
 bool MeshCoreClient::setManualAddContacts(bool enable)

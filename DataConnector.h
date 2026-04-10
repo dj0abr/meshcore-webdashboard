@@ -68,6 +68,7 @@ public:
         uint8_t txtType = 0;
         uint8_t channelIdx = 0;
         std::string text;
+        std::string correlationKey;
     };
 
     struct PushAdvertInfo
@@ -132,6 +133,81 @@ public:
         size_t payloadLen;
     };
 
+    struct PushRxLogInfo
+    {
+        bool valid = false;
+        size_t payloadLen = 0;
+
+        uint8_t pushCode = 0;
+        uint8_t routeType = 0;
+        uint8_t payloadType = 0;
+        uint8_t payloadVersion = 0;
+
+        uint8_t channelIdx = 0;
+        bool hasChannelIdx = false;
+
+        uint32_t senderTimestamp = 0;
+        bool hasSenderTimestamp = false;
+
+        uint8_t txtType = 0;
+        bool hasTxtType = false;
+
+        std::string messageText;
+        bool hasMessageText = false;
+
+        double snrDb = 0.0;
+        bool hasSnrDb = false;
+
+        int rssiDbm = 0;
+        bool hasRssiDbm = false;
+
+        uint8_t pathLen = 0;
+        bool hasPathLen = false;
+
+        uint8_t pathHashSize = 0;
+        bool hasPathHashSize = false;
+
+        uint32_t pktHash = 0;
+        bool hasPktHash = false;
+
+        std::string correlationKey;
+        std::string rawHex;
+        std::string pathText;
+
+        bool hasAdvert = false;
+        bool advertValid = false;
+
+        std::string advertPublicKey;
+        bool hasAdvertPublicKey = false;
+
+        uint32_t advertTimestamp = 0;
+        bool hasAdvertTimestamp = false;
+
+        uint8_t advertRole = 0;
+        bool hasAdvertRole = false;
+
+        bool advertHasGps = false;
+        bool hasAdvertHasGps = false;
+
+        bool advertHasBle = false;
+        bool hasAdvertHasBle = false;
+
+        bool advertHasShortcut = false;
+        bool hasAdvertHasShortcut = false;
+
+        bool advertHasName = false;
+        bool hasAdvertHasName = false;
+
+        int32_t advertLatitudeE6 = 0;
+        bool hasAdvertLatitudeE6 = false;
+
+        int32_t advertLongitudeE6 = 0;
+        bool hasAdvertLongitudeE6 = false;
+
+        std::string advertName;
+        bool hasAdvertName = false;
+    };
+
     struct RoomPasswordRequiredInfo
     {
         std::string roomName;
@@ -150,6 +226,7 @@ public:
     static std::string FormatPush(const PushTraceInfo& info);
     static std::string FormatPush(const PushNewAdvertInfo& info);
     static std::string FormatPush(const PushUnknownInfo& info);
+    static std::string FormatPush(const PushRxLogInfo& info);
 
     static void Emit(const AdvertInfo& info);
     static void Emit(const MessageInfo& info);
@@ -161,6 +238,7 @@ public:
     static void Emit(const PushNewAdvertInfo& info);
     static void Emit(const PushUnknownInfo& info);
     static void Emit(const RoomPasswordRequiredInfo& info);
+    static void Emit(const PushRxLogInfo& info);
 
     static std::string formatLocalTime(uint32_t epoch);
     static std::string hexBytes(const uint8_t* p, size_t n);
@@ -182,6 +260,7 @@ private:
     static EventType GetEventType(const PushTraceInfo&);
     static EventType GetEventType(const PushNewAdvertInfo&);
     static EventType GetEventType(const PushUnknownInfo&);
+    static EventType GetEventType(const PushRxLogInfo&);
 
     static bool s_consoleOutputEnabled;
 

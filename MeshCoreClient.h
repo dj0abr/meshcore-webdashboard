@@ -12,6 +12,7 @@
 #include <thread>
 #include <vector>
 #include <map>
+#include <cmath>
 
 #include "MeshCoreLink.h"
 #include "MeshCoreProto.h"
@@ -37,13 +38,17 @@ public:
     struct RxMessage
     {
         bool isChannel;
-        uint8_t channelIdx;       // valid if isChannel
-        uint8_t txtType;
-        uint8_t pathLen;
-        float snrDb;              // NaN if not provided
-        uint32_t senderTimestamp; // epoch secs (UTC), as provided by sender
-        std::array<uint8_t, 6> senderPrefix6; // for contact messages
+        uint8_t channelIdx = 0;
+        uint8_t txtType = 0;
+        uint8_t pathLen = 0;
+        float snrDb = nanf("");
+        uint8_t pathHashSize;
+        uint32_t senderTimestamp = 0;
+        std::array<uint8_t, 6> senderPrefix6 {};
         std::string text;
+
+        uint8_t respCode = 0;
+        std::vector<uint8_t> rawFrame;
     };
 
     struct ChannelInfo
@@ -141,8 +146,6 @@ public:
 
     bool sendSelfAdvert(bool flood = false);
 
-    void setEnableRxLog(bool enable);
-    bool isRxLogEnabled() const;
     std::string nameFromPrefix6(const std::array<uint8_t, 6> &pfx) const;
 
     bool setManualAddContacts(bool enable);

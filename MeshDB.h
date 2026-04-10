@@ -215,6 +215,7 @@ public:
         bool isDefault);
 
     static std::optional<ChannelRecord> FindChannelByIdx(uint8_t channelIdx);
+    static std::optional<ChannelRecord> FindChannelByName(const std::string& channelName);
     static std::vector<ChannelRecord> ListChannels(bool includeObserved);
     static bool MarkChannelObserved(uint8_t channelIdx);
     static bool MarkChannelObservedUnlocked(uint8_t channelIdx);
@@ -244,6 +245,7 @@ public:
     static std::vector<ChannelRecord> ListPendingChannelSync();
     static bool MarkChannelSyncError(uint8_t channelIdx, const std::string& errorText);
     static bool MarkChannelDeletePending(uint8_t channelIdx);
+    static bool StorePushRxLog(const DataConnector::PushRxLogInfo& info, const std::string& summary);
     
 private:
 

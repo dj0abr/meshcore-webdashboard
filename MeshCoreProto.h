@@ -67,6 +67,7 @@ namespace MeshCoreProto
     static constexpr uint8_t PUSH_CODE_LOGIN_SUCCESS      = 0x85;
     static constexpr uint8_t PUSH_CODE_LOGIN_FAIL         = 0x86;
     static constexpr uint8_t PUSH_CODE_STATUS_RESPONSE    = 0x87;
+    static constexpr uint8_t PUSH_CODE_RX_LOG_DATA        = 0x88;
     static constexpr uint8_t PUSH_CODE_TRACE_DATA         = 0x89;
     static constexpr uint8_t PUSH_CODE_NEW_ADVERT         = 0x8A;
     static constexpr uint8_t PUSH_CODE_TELEMETRY_RESPONSE = 0x8B;

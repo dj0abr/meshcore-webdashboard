@@ -1,6 +1,7 @@
 #include "MessageRouter.h"
 #include "DataConnector.h"
 #include "MeshDB.h"
+#include "MessageCorrelation.h"
 
 #include <iostream>
 
@@ -26,13 +27,17 @@ void MessageRouter::Attach()
 
 void MessageRouter::HandleMessage(const MeshCoreClient::RxMessage& msg, const std::string& fromName)
 {
-    std::cout << "[MessageRouter] HandleMessage:"
-            << " isChannel=" << (msg.isChannel ? 1 : 0)
-            << " channelIdx=" << unsigned(msg.channelIdx)
-            << " txtType=" << unsigned(msg.txtType)
-            << " fromName=[" << fromName << "]"
-            << " text=[" << msg.text << "]"
-            << "\n";
+    std::cout   << "[MessageRouter] HandleMessage:"
+                << " isChannel=" << (msg.isChannel ? 1 : 0)
+                << " channelIdx=" << unsigned(msg.channelIdx)
+                << " txtType=" << unsigned(msg.txtType)
+                << " pathLen=" << unsigned(msg.pathLen)
+                << " snrDb=" << msg.snrDb
+                << " senderTimestamp=" << msg.senderTimestamp
+                << " fromName=[" << fromName << "]"
+                << " textLen=" << msg.text.size()
+                << " text=[" << msg.text << "]"
+                << "\n";
 
     DataConnector::MessageInfo info {};
 
@@ -84,12 +89,27 @@ void MessageRouter::HandleMessage(const MeshCoreClient::RxMessage& msg, const st
         info.kind = DataConnector::MessageInfo::Kind::Direct;
     }
 
+    if (info.kind == DataConnector::MessageInfo::Kind::Channel)
+    {
+        info.correlationKey = MessageCorrelation::BuildKey(
+            info.channelIdx,
+            info.senderTimestamp,
+            info.txtType,
+            info.text);
+    }
+
     std::cout << "[MessageRouter] emitting MessageInfo:"
-          << " kind=" << unsigned(static_cast<uint8_t>(info.kind))
-          << " channelIdx=" << unsigned(info.channelIdx)
-          << " fromName=[" << info.fromName << "]"
-          << " text=[" << info.text << "]"
-          << "\n";
+              << " kind=" << unsigned(static_cast<uint8_t>(info.kind))
+              << " channelIdx=" << unsigned(info.channelIdx)
+              << " fromName=[" << info.fromName << "]"
+              << " text=[" << info.text << "]";
+
+    if (!info.correlationKey.empty())
+    {
+        std::cout << " correlationKey=" << info.correlationKey;
+    }
+
+    std::cout << "\n";
 
     DataConnector::Emit(info);
 }

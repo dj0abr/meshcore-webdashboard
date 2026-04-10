@@ -217,7 +217,7 @@ bool MeshCoreProto::decodeDiscoverResponse(const std::vector<uint8_t>& frame, Di
         return false;
     }
 
-    if (frame[0] == 0x88)
+    if (frame[0] == MeshCoreProto::PUSH_CODE_RX_LOG_DATA)
     {
         if (frame.size() < 19)
         {

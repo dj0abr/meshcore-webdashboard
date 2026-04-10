@@ -14,6 +14,16 @@ const el =
     mapView: document.getElementById("mapView"),
     chatInput: document.getElementById("chatInput"),
     chatSendButton: document.getElementById("chatSendButton"),
+    messagesPanelContent: document.getElementById("messagesPanelContent"),
+    chatPathMapPanel: document.getElementById("chatPathMapPanel"),
+    chatPathMap: document.getElementById("chatPathMap"),
+    chatPathMapInfo: document.getElementById("chatPathMapInfo"),
+    chatPathToggleNames: document.getElementById("chatPathToggleNames"),
+    chatPathToggleDistances: document.getElementById("chatPathToggleDistances"),
+    chatPathSplitter: document.getElementById("chatPathSplitter"),
+    chatPathSplitterDragOffset: 0,
+    chatPathSplitterDragStartY: 0,
+    chatPathSplitterDragStartTopPixels: 0,
     roomPasswordModal: document.getElementById("roomPasswordModal"),
     roomPasswordTitle: document.getElementById("roomPasswordTitle"),
     roomPasswordSubtitle: document.getElementById("roomPasswordSubtitle"),
@@ -67,6 +77,14 @@ const state =
 {
     leafletMap: null,
     leafletMarkers: null,
+    chatPathLeafletMap: null,
+    chatPathLayer: null,
+    chatPathShowNames: true,
+    chatPathShowDistances: true,
+    chatPathLastCorrelationKey: "",
+    chatPathLastPreferredPath: null,
+    chatPathTopHeightPercent: 50,
+    chatPathSplitterDragging: false,
     autoZoom: true,
     rightView: "empty",
     chatRow: null,
@@ -116,6 +134,386 @@ const icons =
         shadowSize: [41, 41]
     })
 };
+
+const DEBUG_ENABLED = false;
+
+function consoledebug()
+{
+    if (!DEBUG_ENABLED)
+    {
+        return;
+    }
+
+    consoledebug(...arguments);
+}
+
+function applyChatPathSplitHeight()
+{
+    if (!el.chatView)
+    {
+        return;
+    }
+
+    const percent = Math.max(20, Math.min(80, Number(state.chatPathTopHeightPercent) || 60));
+    el.chatView.style.setProperty("--chat-path-top-height", `${percent}%`);
+}
+
+function beginChatPathSplitterDrag(event)
+{
+    if (!el.chatView || !el.chatPathMapPanel || el.chatPathMapPanel.style.display === "none")
+    {
+        return;
+    }
+
+    const rect = el.chatView.getBoundingClientRect();
+
+    if (!rect || rect.height <= 0)
+    {
+        return;
+    }
+
+    const chatHeader = el.chatView.querySelector(".chat-view-header");
+    const chatInputBar = el.chatView.querySelector(".chat-input-bar");
+
+    const headerHeight = chatHeader ? chatHeader.offsetHeight : 0;
+    const inputHeight = chatInputBar ? chatInputBar.offsetHeight : 0;
+    const splitterHeight = el.chatPathSplitter ? el.chatPathSplitter.offsetHeight : 8;
+
+    const availableHeight = rect.height - headerHeight - inputHeight - splitterHeight;
+
+    if (availableHeight <= 0)
+    {
+        return;
+    }
+
+    state.chatPathSplitterDragging = true;
+    state.chatPathSplitterDragStartY = event.clientY;
+    state.chatPathSplitterDragStartTopPixels = (Number(state.chatPathTopHeightPercent) || 60) / 100.0 * availableHeight;
+
+    el.chatPathSplitter?.classList.add("is-dragging");
+
+    event.preventDefault();
+}
+
+function updateChatPathSplitterDrag(clientY)
+{
+    if (!state.chatPathSplitterDragging || !el.chatView)
+    {
+        return;
+    }
+
+    const rect = el.chatView.getBoundingClientRect();
+
+    if (!rect || rect.height <= 0)
+    {
+        return;
+    }
+
+    const chatHeader = el.chatView.querySelector(".chat-view-header");
+    const chatInputBar = el.chatView.querySelector(".chat-input-bar");
+
+    const headerHeight = chatHeader ? chatHeader.offsetHeight : 0;
+    const inputHeight = chatInputBar ? chatInputBar.offsetHeight : 0;
+    const splitterHeight = el.chatPathSplitter ? el.chatPathSplitter.offsetHeight : 8;
+
+    const availableHeight = rect.height - headerHeight - inputHeight - splitterHeight;
+
+    if (availableHeight <= 0)
+    {
+        return;
+    }
+
+    const deltaY = clientY - state.chatPathSplitterDragStartY;
+    const topPixels = state.chatPathSplitterDragStartTopPixels + deltaY;
+
+    const minTop = 120;
+    const minBottom = 180;
+
+    const clampedTop = Math.max(minTop, Math.min(availableHeight - minBottom, topPixels));
+    const percent = (clampedTop / availableHeight) * 100.0;
+
+    state.chatPathTopHeightPercent = percent;
+    applyChatPathSplitHeight();
+
+    if (state.chatPathLeafletMap)
+    {
+        setTimeout(function()
+        {
+            state.chatPathLeafletMap.invalidateSize();
+        }, 0);
+    }
+}
+
+function endChatPathSplitterDrag()
+{
+    if (!state.chatPathSplitterDragging)
+    {
+        return;
+    }
+
+    state.chatPathSplitterDragging = false;
+    state.chatPathSplitterDragStartY = 0;
+    state.chatPathSplitterDragStartTopPixels = 0;
+
+    el.chatPathSplitter?.classList.remove("is-dragging");
+
+    if (state.chatPathLeafletMap)
+    {
+        setTimeout(function()
+        {
+            state.chatPathLeafletMap.invalidateSize();
+        }, 0);
+    }
+
+    localStorage.setItem("chatPathTopHeightPercent", String(state.chatPathTopHeightPercent));
+}
+
+function ensureChatPathMap()
+{
+    if (!el.chatPathMap)
+    {
+        return null;
+    }
+
+    if (!state.chatPathLeafletMap)
+    {
+        state.chatPathLeafletMap = L.map("chatPathMap",
+        {
+            zoomControl: true,
+            wheelPxPerZoomLevel: 240,
+            zoomSnap: 0.25
+        });
+
+        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+        {
+            maxZoom: 19,
+            attribution: "&copy; OpenStreetMap"
+        }).addTo(state.chatPathLeafletMap);
+
+        state.chatPathLayer = L.layerGroup().addTo(state.chatPathLeafletMap);
+    }
+
+    return state.chatPathLeafletMap;
+}
+
+function hideChatPathMap()
+{
+    if (el.chatPathMapPanel)
+    {
+        el.chatPathMapPanel.style.display = "none";
+    }
+
+    if (el.chatPathSplitter)
+    {
+        el.chatPathSplitter.style.display = "none";
+        el.chatPathSplitter.classList.remove("is-dragging");
+    }
+
+    if (el.chatView)
+    {
+        el.chatView.classList.remove("split-with-path-map");
+        el.chatView.style.removeProperty("--chat-path-top-height");
+    }
+
+    if (el.chatPathMapInfo)
+    {
+        el.chatPathMapInfo.textContent = "";
+    }
+
+    if (state.chatPathLayer)
+    {
+        state.chatPathLayer.clearLayers();
+    }
+
+    state.chatPathLastCorrelationKey = "";
+    state.chatPathLastPreferredPath = null;
+    state.chatPathSplitterDragging = false;
+}
+
+function buildPreferredPathMapPoints(preferredPath)
+{
+    if (!preferredPath)
+    {
+        return [];
+    }
+
+    const points = [];
+    const hops = Array.isArray(preferredPath.hops) ? preferredPath.hops : [];
+
+    hops.forEach(function(hop)
+    {
+        if (
+            hop &&
+            hop.resolved &&
+            hop.node &&
+            Number.isFinite(Number(hop.node.adv_lat_e6)) &&
+            Number.isFinite(Number(hop.node.adv_lon_e6))
+        )
+        {
+            points.push(
+            {
+                type: "hop",
+                hop_index: Number(hop.hop_index),
+                name: hop.node.name || hop.node.prefix6_hex || `Hop ${hop.hop_index}`,
+                lat: Number(hop.node.adv_lat_e6) / 1000000.0,
+                lon: Number(hop.node.adv_lon_e6) / 1000000.0,
+                token: hop.token || "",
+                distance_m: Number.isFinite(Number(hop.distance_m))
+                    ? Number(hop.distance_m)
+                    : null
+            });
+        }
+    });
+
+    if (
+        preferredPath.endpoint &&
+        Number.isFinite(Number(preferredPath.endpoint.latitude_e6)) &&
+        Number.isFinite(Number(preferredPath.endpoint.longitude_e6))
+    )
+    {
+        points.push(
+        {
+            type: "endpoint",
+            name: preferredPath.endpoint.name || "Endpoint",
+            lat: Number(preferredPath.endpoint.latitude_e6) / 1000000.0,
+            lon: Number(preferredPath.endpoint.longitude_e6) / 1000000.0,
+            distance_m: null
+        });
+    }
+
+    return points;
+}
+
+function showPreferredPathInChatMap(correlationKey, preferredPath)
+{
+    if (!el.chatView || !el.chatPathMapPanel || !el.chatPathMap)
+    {
+        return;
+    }
+
+    const points = buildPreferredPathMapPoints(preferredPath);
+
+    state.chatPathLastCorrelationKey = correlationKey;
+    state.chatPathLastPreferredPath = preferredPath;
+
+    if (points.length === 0)    {
+        hideChatPathMap();
+        return;
+    }
+
+    const map = ensureChatPathMap();
+
+    if (!map || !state.chatPathLayer)
+    {
+        return;
+    }
+
+    state.chatPathLayer.clearLayers();
+
+    const latlngs = [];
+
+    points.forEach(function(point)
+    {
+        const latlng = [point.lat, point.lon];
+        latlngs.push(latlng);
+
+        const label = point.type === "endpoint"
+            ? `Endpoint: ${point.name}`
+            : `Hop ${point.hop_index}: ${point.name}`;
+
+        const circle = L.circleMarker(latlng,
+        {
+            radius: 6,
+            color: "#0a203bff",
+            weight: 2,
+            fillColor: "#60a5fa",
+            fillOpacity: 0.8
+        }).addTo(state.chatPathLayer);
+
+        circle.bindPopup(label);
+
+        if (state.chatPathShowNames)
+        {
+            circle.bindTooltip(point.name,
+            {
+                permanent: true,
+                direction: "top",
+                offset: [0, -8]
+            });
+        }
+    });
+
+    if (latlngs.length >= 2)
+    {
+        for (let index = 0; index < points.length - 1; index += 1)
+        {
+            const fromPoint = points[index];
+            const toPoint = points[index + 1];
+            const segmentLatLngs =
+            [
+                [fromPoint.lat, fromPoint.lon],
+                [toPoint.lat, toPoint.lon]
+            ];
+
+            L.polyline(segmentLatLngs,
+            {
+                weight: 2
+            }).addTo(state.chatPathLayer);
+
+            if (state.chatPathShowDistances && fromPoint.distance_m !== null)
+            {
+                const midLat = (fromPoint.lat + toPoint.lat) / 2.0;
+                const midLon = (fromPoint.lon + toPoint.lon) / 2.0;
+                const distanceKm = fromPoint.distance_m / 1000.0;
+
+                L.marker([midLat, midLon],
+                {
+                    interactive: false,
+                    icon: L.divIcon(
+                    {
+                        className: "path-distance-label",
+                        html: `<div>${distanceKm.toFixed(1)} km</div>`
+                    })
+                }).addTo(state.chatPathLayer);
+            }
+        }
+    }
+
+    if (el.chatPathMapInfo)
+    {
+        const pathText = preferredPath && preferredPath.path_text
+            ? preferredPath.path_text
+            : "-";
+
+        el.chatPathMapInfo.textContent = `Key: ${correlationKey} | Path: ${pathText}`;
+    }
+
+    el.chatView.classList.add("split-with-path-map");
+
+    if (el.chatPathSplitter)
+    {
+        el.chatPathSplitter.style.display = "block";
+    }
+
+    el.chatPathMapPanel.style.display = "flex";
+    applyChatPathSplitHeight();
+
+    setTimeout(function()
+    {
+        map.invalidateSize();
+
+        if (latlngs.length === 1)
+        {
+            map.setView(latlngs[0], 13);
+        }
+        else
+        {
+            map.fitBounds(latlngs, { padding: [20, 20] });
+        }
+    }, 0);
+}
+
+const resolvedPathsByCorrelationKey = {};
 
 function formatMessageText(text)
 {
@@ -1322,6 +1720,7 @@ function showEmptyRightPanel()
 
     setChatInputEnabled(false);
     hideRightPanelViews();
+    hideChatPathMap();
 
     if (el.mapEmpty)
     {
@@ -1342,6 +1741,7 @@ function showInfoForRow(row)
 
     setChatInputEnabled(false);
     hideRightPanelViews();
+    hideChatPathMap();
 
     if (el.mapEmpty)
     {
@@ -1366,6 +1766,7 @@ function showMapForRow(row)
     }
 
     hideRightPanelViews();
+    hideChatPathMap();
     el.mapView.style.display = "block";
 
     const map = ensureMap();
@@ -1409,6 +1810,7 @@ function showAllNodesMap()
     });
 
     hideRightPanelViews();
+    hideChatPathMap();
     el.mapView.style.display = "block";
 
     const map = ensureMap();
@@ -1814,9 +2216,27 @@ function renderIncomingMessage(msg)
         ? roomSenderName
         : extractReplyNameFromMessage(msg);
 
+    const correlationKey = String(msg.correlation_key || "").trim();
+
     const replyButton =
         replyName !== ""
-            ? `<button type="button" class="chat-reply-button" data-reply-name="${escapeHtml(replyName)}" title="${escapeHtml(tr("chat.reply_to", "Antwort an"))} ${escapeHtml(replyName)}">@</button>`
+            ? `<button type="button"
+                       class="chat-action-button chat-reply-button"
+                       data-reply-name="${escapeHtml(replyName)}"
+                       title="${escapeHtml(tr("chat.reply_to", "Antwort an"))} ${escapeHtml(replyName)}">@</button>`
+            : "";
+
+    const pathButton =
+        correlationKey !== ""
+            ? `<button type="button"
+                       class="chat-action-button chat-path-button"
+                       data-correlation-key="${escapeHtml(correlationKey)}"
+                       title="${escapeHtml(tr("chat.show_path", "Pfad anzeigen"))}">⤳</button>`
+            : "";
+
+    const actionButtons =
+        (replyButton !== "" || pathButton !== "")
+            ? `<div class="chat-message-actions">${replyButton}${pathButton}</div>`
             : "";
 
     return `
@@ -1827,12 +2247,549 @@ function renderIncomingMessage(msg)
                     <span>${escapeHtml(tr("chat.snr", "SNR"))}: ${escapeHtml(snr)}</span>
                     <span>${escapeHtml(tr("chat.path", "Path"))}: ${escapeHtml(path)}</span>
                 </div>
-                ${replyButton}
+                ${actionButtons}
             </div>
             ${senderBlock}
             <div class="chat-message-text">${textValue}</div>
         </div>
     `;
+}
+
+function hasValidCoords(node)
+{
+    if (!node)
+    {
+        return false;
+    }
+
+    return Number.isFinite(Number(node.adv_lat_e6)) && Number.isFinite(Number(node.adv_lon_e6));
+}
+
+function hasValidEndpointCoords(endpoint)
+{
+    if (!endpoint)
+    {
+        return false;
+    }
+
+    return Number.isFinite(Number(endpoint.latitude_e6)) && Number.isFinite(Number(endpoint.longitude_e6));
+}
+
+function e6ToDegrees(value)
+{
+    return Number(value) / 1000000.0;
+}
+
+function degToRad(value)
+{
+    return value * Math.PI / 180.0;
+}
+
+function distanceMeters(lat1E6, lon1E6, lat2E6, lon2E6)
+{
+    const lat1 = e6ToDegrees(lat1E6);
+    const lon1 = e6ToDegrees(lon1E6);
+    const lat2 = e6ToDegrees(lat2E6);
+    const lon2 = e6ToDegrees(lon2E6);
+
+    const earthRadiusMeters = 6371000.0;
+
+    const dLat = degToRad(lat2 - lat1);
+    const dLon = degToRad(lon2 - lon1);
+
+    const a =
+        Math.sin(dLat / 2.0) * Math.sin(dLat / 2.0) +
+        Math.cos(degToRad(lat1)) * Math.cos(degToRad(lat2)) *
+        Math.sin(dLon / 2.0) * Math.sin(dLon / 2.0);
+
+    const c = 2.0 * Math.atan2(Math.sqrt(a), Math.sqrt(1.0 - a));
+
+    return earthRadiusMeters * c;
+}
+
+function formatDistanceMeters(distance)
+{
+    if (!Number.isFinite(distance))
+    {
+        return "n/a";
+    }
+
+    if (distance < 1000.0)
+    {
+        return `${Math.round(distance)} m`;
+    }
+
+    return `${(distance / 1000.0).toFixed(2)} km`;
+}
+
+function resolvePathGreedyFromEndpoint(pathEntry, endpoint)
+{
+    let lastSelectedPrefix6Hex = "";
+
+    const result =
+    {
+        path_id: pathEntry.id,
+        created_at: pathEntry.created_at,
+        path_text: pathEntry.path_text,
+        hop_count: pathEntry.hop_count,
+        resolved: false,
+        resolved_fully: false,
+        resolved_partially: false,
+        resolution_mode: "unresolved",
+        resolved_hops: []
+    };
+
+    const hops = Array.isArray(pathEntry.hops) ? pathEntry.hops : [];
+
+    if (!hasValidEndpointCoords(endpoint))
+    {
+        result.resolution_mode = "missing_endpoint_coords";
+        return result;
+    }
+
+    let referencePoint =
+    {
+        kind: "endpoint",
+        name: endpoint.name || "endpoint",
+        lat_e6: Number(endpoint.latitude_e6),
+        lon_e6: Number(endpoint.longitude_e6)
+    };
+
+    const resolvedFromBack = [];
+
+    for (let hopIndex = hops.length - 1; hopIndex >= 0; hopIndex -= 1)
+    {
+        const hop = hops[hopIndex];
+        const matches = Array.isArray(hop.matches) ? hop.matches : [];
+
+        const matchesWithDistance = matches.map(function(match)
+        {
+            const candidate =
+            {
+                prefix6_hex: match.prefix6_hex || "",
+                name: match.name || "",
+                adv_lat_e6: match.adv_lat_e6,
+                adv_lon_e6: match.adv_lon_e6,
+                has_coords: hasValidCoords(match),
+                distance_m: null
+            };
+
+            if (candidate.has_coords)
+            {
+                candidate.distance_m = distanceMeters(
+                    referencePoint.lat_e6,
+                    referencePoint.lon_e6,
+                    candidate.adv_lat_e6,
+                    candidate.adv_lon_e6
+                );
+            }
+
+            return candidate;
+        });
+
+        let candidatesWithCoords = matchesWithDistance.filter(function(candidate)
+        {
+            return candidate.has_coords && Number.isFinite(candidate.distance_m);
+        });
+
+        const candidatesWithoutImmediateDuplicate = candidatesWithCoords.filter(function(candidate)
+        {
+            return (candidate.prefix6_hex || "") !== lastSelectedPrefix6Hex;
+        });
+
+        if (candidatesWithoutImmediateDuplicate.length > 0)
+        {
+            candidatesWithCoords = candidatesWithoutImmediateDuplicate;
+        }
+
+        if (candidatesWithCoords.length === 0)
+        {
+            resolvedFromBack.push(
+            {
+                hop_index: hopIndex,
+                token: hop.token,
+                token_len: hop.token_len,
+                original_match_count: hop.match_count,
+                selected: null,
+                all_candidates: matchesWithDistance,
+                note: "no_candidate_with_coords",
+                reference_used:
+                {
+                    kind: referencePoint.kind,
+                    name: referencePoint.name,
+                    lat_e6: referencePoint.lat_e6,
+                    lon_e6: referencePoint.lon_e6
+                }
+            });
+
+            result.resolution_mode = "partial_greedy_from_endpoint";
+            continue;
+        }
+
+        candidatesWithCoords.sort(function(a, b)
+        {
+            return a.distance_m - b.distance_m;
+        });
+
+        const selected = candidatesWithCoords[0];
+
+        resolvedFromBack.push(
+        {
+            hop_index: hopIndex,
+            token: hop.token,
+            token_len: hop.token_len,
+            original_match_count: hop.match_count,
+            selected: selected,
+            all_candidates: matchesWithDistance,
+            note: "selected_shortest_distance",
+            reference_used:
+            {
+                kind: referencePoint.kind,
+                name: referencePoint.name,
+                lat_e6: referencePoint.lat_e6,
+                lon_e6: referencePoint.lon_e6
+            }
+        });
+
+        lastSelectedPrefix6Hex = selected.prefix6_hex || "";
+
+        referencePoint =
+        {
+            kind: "node",
+            name: selected.name,
+            lat_e6: Number(selected.adv_lat_e6),
+            lon_e6: Number(selected.adv_lon_e6)
+        };
+    }
+
+    const unresolvedCount = resolvedFromBack.filter(function(hop)
+    {
+        return !hop.selected;
+    }).length;
+
+    result.resolved = (unresolvedCount === 0);
+    result.resolved_fully = (unresolvedCount === 0);
+    result.resolved_partially = (resolvedFromBack.length > 0);
+    result.resolution_mode = (unresolvedCount === 0)
+        ? "greedy_from_endpoint"
+        : "partial_greedy_from_endpoint";
+    result.resolved_hops = resolvedFromBack.reverse();
+
+    return result;
+}
+
+function buildResolvedPathListEntry(resolvedPath, endpoint)
+{
+    const resolvedHops = Array.isArray(resolvedPath.resolved_hops)
+        ? resolvedPath.resolved_hops
+        : [];
+
+    const normalizedHops = resolvedHops.map(function(hop)
+    {
+        const isResolved = !!hop.selected;
+
+        return {
+            hop_index: hop.hop_index,
+            token: hop.token || "",
+            token_len: Number(hop.token_len || 0),
+            original_match_count: Number(hop.original_match_count || 0),
+            resolved: isResolved,
+            note: hop.note || "",
+            node: isResolved
+                ? {
+                    prefix6_hex: hop.selected.prefix6_hex || "",
+                    name: hop.selected.name || "",
+                    adv_lat_e6: hop.selected.adv_lat_e6,
+                    adv_lon_e6: hop.selected.adv_lon_e6
+                }
+                : null,
+            reference: hop.reference_used
+                ? {
+                    kind: hop.reference_used.kind || "",
+                    name: hop.reference_used.name || "",
+                    lat_e6: hop.reference_used.lat_e6,
+                    lon_e6: hop.reference_used.lon_e6
+                }
+                : null,
+            distance_m: isResolved ? hop.selected.distance_m : null
+        };
+    });
+
+    return {
+        path_id: resolvedPath.path_id,
+        created_at: resolvedPath.created_at,
+        path_text: resolvedPath.path_text,
+        hop_count: Number(resolvedPath.hop_count || 0),
+        resolved: !!resolvedPath.resolved,
+        resolved_fully: !!resolvedPath.resolved_fully,
+        resolved_partially: !!resolvedPath.resolved_partially,
+        resolution_mode: resolvedPath.resolution_mode || "unresolved",
+        endpoint: endpoint
+            ? {
+                id: endpoint.id ?? null,
+                name: endpoint.name || "",
+                latitude_e6: endpoint.latitude_e6 ?? null,
+                longitude_e6: endpoint.longitude_e6 ?? null
+            }
+            : null,
+        hops: normalizedHops
+    };
+}
+
+function pathHasNoGaps(pathEntry)
+{
+    const hops = Array.isArray(pathEntry.hops) ? pathEntry.hops : [];
+
+    if (hops.length === 0)
+    {
+        return false;
+    }
+
+    return hops.every(function(hop)
+    {
+        return !!hop.resolved;
+    });
+}
+
+function selectPreferredResolvedPath(resolvedPathList)
+{
+    const paths = Array.isArray(resolvedPathList) ? resolvedPathList : [];
+
+    if (paths.length === 0)
+    {
+        return null;
+    }
+
+    const completePaths = paths.filter(function(pathEntry)
+    {
+        return pathHasNoGaps(pathEntry);
+    });
+
+    const candidatePaths = completePaths.length > 0 ? completePaths : paths;
+
+    let bestPath = candidatePaths[0];
+
+    for (let index = 1; index < candidatePaths.length; index += 1)
+    {
+        const currentPath = candidatePaths[index];
+        const bestHopCount = Number(bestPath.hop_count || 0);
+        const currentHopCount = Number(currentPath.hop_count || 0);
+
+        if (currentHopCount < bestHopCount)
+        {
+            bestPath = currentPath;
+        }
+    }
+
+    return bestPath;
+}
+
+function debugPrintPreferredResolvedPath(preferredPath)
+{
+    if (!preferredPath)
+    {
+        console.debug("PreferredResolvedPath: keiner gefunden");
+        return;
+    }
+
+    console.debug("PreferredResolvedPath (object):", preferredPath);
+
+    try
+    {
+        console.debug(
+            "PreferredResolvedPath (pretty JSON):\n" +
+            JSON.stringify(preferredPath/*, null, 2*/)
+        );
+    }
+    catch (error)
+    {
+        console.error("PreferredResolvedPath JSON stringify fehlgeschlagen:", error);
+    }
+}
+
+function buildResolvedPathList(paths, endpoint)
+{
+    return paths.map(function(pathEntry)
+    {
+        const resolvedPath = resolvePathGreedyFromEndpoint(pathEntry, endpoint);
+        return buildResolvedPathListEntry(resolvedPath, endpoint);
+    });
+}
+
+function debugPrintResolvedPath(resolvedPath, endpoint)
+{
+    consoledebug(
+        `Greedy-Aufloesung: path_id=${resolvedPath.path_id}, mode=${resolvedPath.resolution_mode}, resolved=${resolvedPath.resolved}`
+    );
+
+    if (hasValidEndpointCoords(endpoint))
+    {
+        consoledebug(
+            `  Endpunkt: ${endpoint.name || ""} (${endpoint.latitude_e6}, ${endpoint.longitude_e6})`
+        );
+    }
+
+    const hops = Array.isArray(resolvedPath.resolved_hops) ? resolvedPath.resolved_hops : [];
+
+    for (let index = hops.length - 1; index >= 0; index -= 1)
+    {
+        const hop = hops[index];
+
+        consoledebug(
+            `  [Resolved Hop ${hop.hop_index}] token=${hop.token}, original_match_count=${hop.original_match_count}, note=${hop.note}`
+        );
+
+        if (!hop.selected)
+        {
+            consoledebug("    kein eindeutiger Kandidat bestimmbar");
+            continue;
+        }
+
+        let targetLabel = "unbekannt";
+
+        if (index === hops.length - 1)
+        {
+            targetLabel = `Endpunkt ${endpoint && endpoint.name ? endpoint.name : ""}`.trim();
+        }
+        else
+        {
+            const nextHop = hops[index + 1];
+
+            if (nextHop && nextHop.selected)
+            {
+                targetLabel = `Hop ${nextHop.hop_index} ${nextHop.selected.name || nextHop.selected.prefix6_hex || ""}`.trim();
+            }
+            else if (nextHop)
+            {
+                targetLabel = `Hop ${nextHop.hop_index} (unaufgeloest)`;
+            }
+        }
+
+        consoledebug(
+            `    Segment: Hop ${hop.hop_index} -> ${targetLabel}, distance=${formatDistanceMeters(hop.selected.distance_m)}`
+        );
+
+        consoledebug(
+            `    selected: prefix6_hex=${hop.selected.prefix6_hex}, name=${hop.selected.name}, adv_lat_e6=${hop.selected.adv_lat_e6}, adv_lon_e6=${hop.selected.adv_lon_e6}`
+        );
+    }
+}
+
+async function handleMessagePathClick(correlationKey)
+{
+    const key = String(correlationKey || "").trim();
+
+    if (key === "")
+    {
+        consoledebug("handleMessagePathClick: leerer correlation_key");
+        return;
+    }
+
+    try
+    {
+        const data = await fetchJson(
+            `message_path.php?correlation_key=${encodeURIComponent(key)}&_=${Date.now()}`
+        );
+
+        const paths = Array.isArray(data.paths) ? data.paths : [];
+        const endpoint = data.endpoint || null;
+
+        consoledebug("Path lookup:", key, "Treffer:", paths.length);
+
+        if (endpoint)
+        {
+            consoledebug(
+                `Endpunkt: id=${endpoint.id}, name=${endpoint.name || ""}, latitude_e6=${endpoint.latitude_e6}, longitude_e6=${endpoint.longitude_e6}`
+            );
+        }
+        else
+        {
+            consoledebug("Endpunkt: nicht vorhanden");
+        }
+
+        if (paths.length === 0)
+        {
+            consoledebug("Keine rx_log_messages für correlation_key gefunden.");
+            return;
+        }
+
+        paths.forEach(function(pathEntry, pathIndex)
+        {
+            consoledebug(
+                `[Pfad ${pathIndex}] id=${pathEntry.id}, created_at=${pathEntry.created_at}, path_text=${pathEntry.path_text || ""}, hops=${pathEntry.hop_count || 0}`
+            );
+
+            const hops = Array.isArray(pathEntry.hops) ? pathEntry.hops : [];
+
+            hops.forEach(function(hop, hopIndex)
+            {
+                consoledebug(
+                    `  [Hop ${hopIndex}] token=${hop.token}, token_len=${hop.token_len}, match_count=${hop.match_count}`
+                );
+
+                const matches = Array.isArray(hop.matches) ? hop.matches : [];
+
+                if (matches.length === 0)
+                {
+                    consoledebug("    keine Node-Matches");
+                    return;
+                }
+
+                matches.forEach(function(match, matchIndex)
+                {
+                    consoledebug(
+                        `    [Match ${matchIndex}] prefix6_hex=${match.prefix6_hex || ""}, name=${match.name || ""}, adv_lat_e6=${match.adv_lat_e6}, adv_lon_e6=${match.adv_lon_e6}`
+                    );
+                });
+            });
+
+            const resolvedPath = resolvePathGreedyFromEndpoint(pathEntry, endpoint);
+            debugPrintResolvedPath(resolvedPath, endpoint);
+        });
+
+        const normalizedResolvedPaths = buildResolvedPathList(paths, endpoint);
+        const preferredResolvedPath = selectPreferredResolvedPath(normalizedResolvedPaths);
+
+        resolvedPathsByCorrelationKey[key] =
+        {
+            all_paths: normalizedResolvedPaths,
+            preferred_path: preferredResolvedPath
+        };
+
+        consoledebug("ResolvedPathList (object):", normalizedResolvedPaths);
+
+        try
+        {
+            const jsonPretty = JSON.stringify(normalizedResolvedPaths, null, 2);
+            const jsonCompact = JSON.stringify(normalizedResolvedPaths);
+
+            //console.debug("ResolvedPathList (pretty JSON):\n" + jsonPretty);
+            //console.debug("ResolvedPathList (compact JSON):", jsonCompact);
+        }
+        catch (error)
+        {
+            console.error("JSON stringify fehlgeschlagen:", error);
+        }
+
+        resolvedPathsByCorrelationKey[key] =
+        {
+            all_paths: normalizedResolvedPaths,
+            preferred_path: preferredResolvedPath
+        };
+
+        if (!preferredResolvedPath)
+        {
+            hideChatPathMap();
+            return;
+        }
+
+        debugPrintPreferredResolvedPath(preferredResolvedPath);
+        showPreferredPathInChatMap(key, preferredResolvedPath);
+    }
+    catch (error)
+    {
+        console.error("Pfadabfrage fehlgeschlagen:", error);
+    }
 }
 
 function renderChatMessages(messages)
@@ -1985,6 +2942,7 @@ async function showChatForRow(row)
     }
 
     hideRightPanelViews();
+    hideChatPathMap();
 
     const chatName = row.name || getChatKindLabel(row);
     el.chatTitle.textContent = `${getChatKindLabel(row)}: ${chatName}`;
@@ -3354,15 +4312,22 @@ if (el.chatBody)
 {
     el.chatBody.addEventListener("click", function(event)
     {
-        const button = event.target.closest(".chat-reply-button");
+        const replyButton = event.target.closest(".chat-reply-button");
 
-        if (!button)
+        if (replyButton)
         {
+            const name = replyButton.getAttribute("data-reply-name") || "";
+            insertReplyMention(name);
             return;
         }
 
-        const name = button.getAttribute("data-reply-name") || "";
-        insertReplyMention(name);
+        const pathButton = event.target.closest(".chat-path-button");
+
+        if (pathButton)
+        {
+            const correlationKey = pathButton.getAttribute("data-correlation-key") || "";
+            handleMessagePathClick(correlationKey);
+        }
     });
 }
 
@@ -3372,6 +4337,56 @@ if (el.chatSendButton)
     {
         sendCurrentChatMessage();
     });
+}
+
+document.getElementById("chatPathMapClose")?.addEventListener("click", function()
+{
+    hideChatPathMap();
+});
+
+el.chatPathToggleNames?.addEventListener("change", function()
+{
+    state.chatPathShowNames = !!el.chatPathToggleNames.checked;
+
+    if (state.chatPathLastPreferredPath)
+    {
+        showPreferredPathInChatMap(
+            state.chatPathLastCorrelationKey,
+            state.chatPathLastPreferredPath
+        );
+    }
+});
+
+el.chatPathToggleDistances?.addEventListener("change", function()
+{
+    state.chatPathShowDistances = !!el.chatPathToggleDistances.checked;
+
+    if (state.chatPathLastPreferredPath)
+    {
+        showPreferredPathInChatMap(
+            state.chatPathLastCorrelationKey,
+            state.chatPathLastPreferredPath
+        );
+    }
+});
+
+el.chatPathSplitter?.addEventListener("mousedown", beginChatPathSplitterDrag);
+
+document.addEventListener("mousemove", function(event)
+{
+    updateChatPathSplitterDrag(event.clientY);
+});
+
+document.addEventListener("mouseup", function()
+{
+    endChatPathSplitterDrag();
+});
+
+const savedChatPathTopHeightPercent = Number(localStorage.getItem("chatPathTopHeightPercent"));
+
+if (Number.isFinite(savedChatPathTopHeightPercent))
+{
+    state.chatPathTopHeightPercent = Math.max(20, Math.min(80, savedChatPathTopHeightPercent));
 }
 
 if (el.roomPasswordSaveButton)

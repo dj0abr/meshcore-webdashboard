@@ -119,6 +119,11 @@ DataConnector::EventType DataConnector::GetEventType(const PushUnknownInfo&)
     return EventType::PushUnknown;
 }
 
+DataConnector::EventType DataConnector::GetEventType(const PushRxLogInfo&)
+{
+    return EventType::PushSimple;
+}
+
 std::string DataConnector::FormatAdvert(const AdvertInfo& info)
 {
     std::ostringstream oss;
@@ -325,6 +330,98 @@ std::string DataConnector::FormatPush(const PushUnknownInfo& info)
     return oss.str();
 }
 
+std::string DataConnector::FormatPush(const PushRxLogInfo& info)
+{
+    std::ostringstream oss;
+
+    oss << "[PUSH RX_LOG]";
+
+    if (!info.valid)
+    {
+        oss << " len=" << info.payloadLen;
+        return oss.str();
+    }
+
+    oss
+        << " routeType=" << unsigned(info.routeType)
+        << " payloadType=" << unsigned(info.payloadType)
+        << " payloadVersion=" << unsigned(info.payloadVersion);
+
+    if (info.hasChannelIdx)
+    {
+        oss << " ch=" << unsigned(info.channelIdx);
+    }
+
+    if (info.hasSenderTimestamp)
+    {
+        oss << " ts=" << info.senderTimestamp;
+    }
+
+    if (info.hasTxtType)
+    {
+        oss << " txtType=" << unsigned(info.txtType);
+    }
+
+    if (info.hasSnrDb)
+    {
+        oss << " snr=" << info.snrDb;
+    }
+
+    if (info.hasRssiDbm)
+    {
+        oss << " rssi=" << info.rssiDbm;
+    }
+
+    if (info.hasPathLen)
+    {
+        oss << " pathLen=" << unsigned(info.pathLen);
+    }
+
+    if (!info.pathText.empty())
+    {
+        oss << " path=" << info.pathText;
+    }
+
+    if (info.hasPktHash)
+    {
+        oss << " pktHash=0x" << u32hex(info.pktHash);
+    }
+
+    if (info.hasAdvert)
+    {
+        oss << " advert";
+
+        if (info.hasAdvertName)
+        {
+            oss << " name=" << info.advertName;
+        }
+
+        if (info.hasAdvertRole)
+        {
+            oss << " role=" << unsigned(info.advertRole);
+        }
+
+        if (info.hasAdvertPublicKey)
+        {
+            oss << " pk=" << info.advertPublicKey.substr(0, 12) << "...";
+        }
+
+        if (info.hasAdvertLatitudeE6 && info.hasAdvertLongitudeE6)
+        {
+            oss
+                << " latE6=" << info.advertLatitudeE6
+                << " lonE6=" << info.advertLongitudeE6;
+        }
+    }
+
+    if (info.hasMessageText)
+    {
+        oss << "\n    " << info.messageText;
+    }
+
+    return oss.str();
+}
+
 void DataConnector::EmitFormatted(EventType eventType, const std::string& line)
 {
     (void)eventType;
@@ -412,4 +509,11 @@ void DataConnector::Emit(const RoomPasswordRequiredInfo& info)
               << " room=" << info.roomName
               << " node=" << info.roomNodeId
               << "\n";
+}
+
+void DataConnector::Emit(const PushRxLogInfo& info)
+{
+    const std::string line = FormatPush(info);
+    MeshDB::StorePushRxLog(info, line);
+    EmitFormatted(GetEventType(info), line);
 }

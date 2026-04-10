@@ -1142,7 +1142,14 @@
             gap: 8px;
         }
 
-        .chat-reply-button
+        .chat-message-actions
+        {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .chat-action-button
         {
             border: 1px solid #888;
             background: transparent;
@@ -1153,9 +1160,160 @@
             line-height: 1.2;
         }
 
-        .chat-reply-button:hover
+        .chat-action-button:hover
         {
             opacity: 0.85;
+        }
+
+        #messagesPanelContent
+        {
+            min-height: 0;
+            flex: 1;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .chat-view
+        {
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+        }
+
+        .chat-view.split-with-path-map .chat-view-body
+        {
+            flex: 0 0 var(--chat-path-top-height, 60%);
+            min-height: 120px;
+        }
+
+        .chat-view.split-with-path-map .chat-path-map-panel
+        {
+            display: flex !important;
+            flex: 1 1 auto;
+            min-height: 180px;
+        }
+
+        .chat-path-splitter
+        {
+            display: none;
+            flex: 0 0 8px;
+            cursor: row-resize;
+            position: relative;
+            background: transparent;
+        }
+
+        .chat-path-splitter::before
+        {
+            content: "";
+            position: absolute;
+            left: 12px;
+            right: 12px;
+            top: 50%;
+            height: 2px;
+            transform: translateY(-50%);
+            background: var(--border);
+            border-radius: 999px;
+        }
+
+        .chat-view.split-with-path-map .chat-path-splitter
+        {
+            display: block !important;
+        }
+
+        .chat-path-splitter:hover::before,
+        .chat-path-splitter.is-dragging::before
+        {
+            height: 3px;
+        }
+        .chat-path-map-panel
+        {
+            display: none;
+            flex-direction: column;
+            min-height: 0;
+            border-top: 1px solid var(--border);
+            background: #0b1220;
+        }
+
+        .chat-path-map-header
+        {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 10px 14px;
+            border-bottom: 1px solid var(--border);
+            background: rgba(255, 255, 255, 0.02);
+            color: var(--text);
+            font-size: 13px;
+        }
+
+        .chat-path-map-info
+        {
+            color: var(--muted);
+            font-size: 12px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .chat-path-map
+        {
+            flex: 1;
+            min-height: 0;
+        }
+
+        .chat-path-map .leaflet-container,
+        .chat-path-map.leaflet-container
+        {
+            background: #0f172a;
+        }
+
+        #chatPathMapClose
+        {
+            background: transparent;
+            border: 1px solid var(--border);
+            color: var(--text);
+            border-radius: 6px;
+            padding: 2px 8px;
+            cursor: pointer;
+        }
+
+        #chatPathMapClose:hover
+        {
+            background: rgba(255,255,255,0.08);
+        }
+
+        .path-distance-label div
+        {
+            background: transparent;
+            color: #000;
+            border: none;
+            padding: 0;
+            font-size: 12px;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+        .path-map-toggle
+        {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 12px;
+            color: var(--text);
+            padding: 2px 8px;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            background: rgba(255, 255, 255, 0.03);
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .path-map-toggle input
+        {
+            margin: 0;
+            cursor: pointer;
         }
 </style>
 </head>
@@ -1247,7 +1405,7 @@
                 </div>
             </div>
 
-            <div class="panel-content">
+            <div id="messagesPanelContent" class="panel-content">
                 <div id="mapView" class="map-frame" style="display:none;"></div>
 
                 <div id="chatView" class="chat-view" style="display:none;">
@@ -1272,7 +1430,34 @@
                         ></div>
                         <button id="chatSendButton" class="chat-send-button" type="button" data-i18n="chat.send">Senden</button>
                     </div>
-                    
+
+                    <div id="chatPathSplitter" class="chat-path-splitter" style="display:none;" role="separator" aria-orientation="horizontal" title="Größe von Chat und Karte ändern"></div>
+
+                    <div id="chatPathMapPanel" class="chat-path-map-panel" style="display:none;">
+                        <div class="chat-path-map-header">
+                            <strong>Message Path</strong>
+
+                            <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+                                <span id="chatPathMapInfo" class="chat-path-map-info"></span>
+
+                                <label class="path-map-toggle">
+                                    <input id="chatPathToggleNames" type="checkbox" checked>
+                                    <span>Namen</span>
+                                </label>
+
+                                <label class="path-map-toggle">
+                                    <input id="chatPathToggleDistances" type="checkbox" checked>
+                                    <span>Entfernung</span>
+                                </label>
+
+                                <button id="chatPathMapClose" type="button" title="Schließen">✕</button>
+                            </div>
+                        </div>
+
+                        <div id="chatPathMap" class="chat-path-map"></div>
+                    </div>
+                </div>
+
                 <div id="mapEmpty" class="empty-state" data-i18n="map.empty.default">
                     Linksklick auf Chat oder Room = Verlauf, Rechtsklick = Karte.
                 </div>

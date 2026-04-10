@@ -412,11 +412,13 @@ bool MeshDB::EnsureSchema()
         "    path_len TINYINT UNSIGNED DEFAULT NULL,"
         "    txt_type TINYINT UNSIGNED DEFAULT NULL,"
         "    message_text TEXT NOT NULL,"
+        "    correlation_key CHAR(64) DEFAULT NULL,"
         "    PRIMARY KEY (id),"
         "    KEY idx_messages_received_at (received_at),"
         "    KEY idx_messages_is_channel (is_channel),"
         "    KEY idx_messages_channel_idx (channel_idx),"
-        "    KEY idx_messages_sender_prefix6_hex (sender_prefix6_hex)"
+        "    KEY idx_messages_sender_prefix6_hex (sender_prefix6_hex),"
+        "    KEY idx_messages_correlation_key (correlation_key)"
         ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4";
 
     const char* sqlEvents =
@@ -551,10 +553,12 @@ bool MeshDB::EnsureSchema()
             "    snr_db FLOAT DEFAULT NULL,"
             "    path_len TINYINT UNSIGNED DEFAULT NULL,"
             "    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,"
+            "    correlation_key CHAR(64) DEFAULT NULL,"
             "    PRIMARY KEY (id),"
             "    KEY idx_chat_messages_conv (chat_kind, name, timestamp_epoch),"
             "    KEY idx_chat_messages_channel (channel_idx, timestamp_epoch),"
-            "    KEY idx_chat_messages_tx_outbox_id (tx_outbox_id)"
+            "    KEY idx_chat_messages_tx_outbox_id (tx_outbox_id),"
+            "    KEY idx_chat_messages_correlation_key (correlation_key)"
             ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4";
 
         const char* sqlCompanionConfig =
@@ -606,6 +610,47 @@ bool MeshDB::EnsureSchema()
             "    KEY idx_discover_results_last_job_id (last_job_id),"
             "    KEY idx_discover_results_rssi (rssi_dbm)"
             ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4";
+    const char* sqlRxLogMessages =
+            "CREATE TABLE IF NOT EXISTS rx_log_messages ("
+            "    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,"
+            "    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,"
+            "    push_code TINYINT UNSIGNED NOT NULL,"
+            "    route_type TINYINT UNSIGNED DEFAULT NULL,"
+            "    payload_type TINYINT UNSIGNED DEFAULT NULL,"
+            "    payload_version TINYINT UNSIGNED DEFAULT NULL,"
+            "    channel_idx INT UNSIGNED DEFAULT NULL,"
+            "    sender_timestamp INT UNSIGNED DEFAULT NULL,"
+            "    txt_type TINYINT UNSIGNED DEFAULT NULL,"
+            "    message_text TEXT DEFAULT NULL,"
+            "    snr_db FLOAT DEFAULT NULL,"
+            "    rssi_dbm INT DEFAULT NULL,"
+            "    path_len TINYINT UNSIGNED DEFAULT NULL,"
+            "    path_hash_size TINYINT UNSIGNED DEFAULT NULL,"
+            "    pkt_hash INT UNSIGNED DEFAULT NULL,"
+            "    correlation_key CHAR(64) DEFAULT NULL,"
+            "    raw_hex MEDIUMTEXT DEFAULT NULL,"
+            "    path_text TEXT DEFAULT NULL,"
+            "    matched_chat_message_id BIGINT UNSIGNED DEFAULT NULL,"
+            "    advert_valid TINYINT(1) DEFAULT NULL,"
+            "    advert_public_key CHAR(64) DEFAULT NULL,"
+            "    advert_timestamp INT UNSIGNED DEFAULT NULL,"
+            "    advert_role TINYINT UNSIGNED DEFAULT NULL,"
+            "    advert_has_gps TINYINT(1) DEFAULT NULL,"
+            "    advert_has_ble TINYINT(1) DEFAULT NULL,"
+            "    advert_has_shortcut TINYINT(1) DEFAULT NULL,"
+            "    advert_has_name TINYINT(1) DEFAULT NULL,"
+            "    advert_latitude_e6 INT DEFAULT NULL,"
+            "    advert_longitude_e6 INT DEFAULT NULL,"
+            "    advert_name VARCHAR(128) DEFAULT NULL,"
+            "    PRIMARY KEY (id),"
+            "    KEY idx_rx_log_created_at (created_at),"
+            "    KEY idx_rx_log_channel_ts (channel_idx, sender_timestamp),"
+            "    KEY idx_rx_log_pkt_hash (pkt_hash),"
+            "    KEY idx_rx_log_correlation_key (correlation_key),"
+            "    KEY idx_rx_log_matched_chat_message_id (matched_chat_message_id),"
+            "    KEY idx_rx_log_advert_public_key (advert_public_key),"
+            "    KEY idx_rx_log_advert_name (advert_name)"
+            ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4";
             
     return Execute(sqlNodes)
         && Execute(sqlMessages)
@@ -615,6 +660,7 @@ bool MeshDB::EnsureSchema()
         && Execute(sqlRoomCredentials)
         && Execute(sqlChannels)
         && Execute(sqlChatMessages)
+        && Execute(sqlRxLogMessages)
         && Execute(sqlCompanionConfig)
         && Execute(sqlDiscoverJobs)
         && Execute(sqlDiscoverResults);
@@ -1026,7 +1072,7 @@ bool MeshDB::StoreMessage(const DataConnector::MessageInfo& info, const std::str
     msgSql
         << "INSERT INTO messages ("
         << "is_channel, channel_idx, from_name, room_sender_name, "
-        << "sender_prefix6_hex, sender_timestamp, snr_db, path_len, txt_type, message_text"
+        << "sender_prefix6_hex, sender_timestamp, snr_db, path_len, txt_type, message_text, correlation_key"
         << ") VALUES ("
         << BoolToSql(info.isChannel) << ", "
         << (info.isChannel ? std::to_string(unsigned(info.channelIdx)) : "NULL") << ", "
@@ -1037,7 +1083,8 @@ bool MeshDB::StoreMessage(const DataConnector::MessageInfo& info, const std::str
         << (std::isnan(info.snrDb) ? "NULL" : std::to_string(info.snrDb)) << ", "
         << ((info.pathLen == 255) ? "NULL" : std::to_string(unsigned(info.pathLen))) << ", "
         << unsigned(info.txtType) << ", "
-        << ToSqlString(info.text)
+        << ToSqlString(info.text) << ", "
+        << (info.correlationKey.empty() ? "NULL" : ToSqlString(info.correlationKey))
         << ")";
 
     if (!Execute(msgSql.str()))
@@ -1092,7 +1139,7 @@ bool MeshDB::StoreMessage(const DataConnector::MessageInfo& info, const std::str
     chatSql
         << "INSERT INTO chat_messages ("
         << "timestamp_epoch, direction, chat_kind, name, room_sender_name, channel_idx, peer_node_id, room_node_id, "
-        << "text, status, tx_outbox_id, sender_prefix6_hex, snr_db, path_len"
+        << "text, status, tx_outbox_id, sender_prefix6_hex, snr_db, path_len, correlation_key"
         << ") VALUES ("
         << nowEpoch << ", "
         << direction << ", "
@@ -1109,7 +1156,8 @@ bool MeshDB::StoreMessage(const DataConnector::MessageInfo& info, const std::str
         << "NULL, "
         << ToSqlNullableString(prefix6Hex) << ", "
         << (std::isnan(info.snrDb) ? "NULL" : std::to_string(info.snrDb)) << ", "
-        << ((info.pathLen == 255) ? "NULL" : std::to_string(unsigned(info.pathLen)))
+        << ((info.pathLen == 255) ? "NULL" : std::to_string(unsigned(info.pathLen))) << ", "
+        << (info.correlationKey.empty() ? "NULL" : ToSqlString(info.correlationKey))
         << ")";
 
     if (!Execute(chatSql.str()))
@@ -2135,6 +2183,65 @@ std::optional<MeshDB::ChannelRecord> MeshDB::FindChannelByIdx(uint8_t channelIdx
     return rec;
 }
 
+std::optional<MeshDB::ChannelRecord> MeshDB::FindChannelByName(const std::string& channelName)
+{
+    std::lock_guard<std::mutex> lock(s_mutex);
+
+    if (!s_ready || (s_conn == nullptr))
+    {
+        return std::nullopt;
+    }
+
+    std::ostringstream sql;
+
+    sql
+        << "SELECT channel_idx, name, join_mode, passphrase, key_hex, "
+        << "enabled, is_default, is_observed, has_local_context, "
+        << "sync_pending, sync_action, sync_error, "
+        << "UNIX_TIMESTAMP(last_seen_at) "
+        << "FROM channels WHERE name = " << ToSqlString(channelName)
+        << " LIMIT 1";
+
+    if (mysql_query(s_conn, sql.str().c_str()) != 0)
+    {
+        std::cerr << "MeshDB SQL error: " << mysql_error(s_conn) << "\n";
+        return std::nullopt;
+    }
+
+    MYSQL_RES* res = mysql_store_result(s_conn);
+
+    if (res == nullptr)
+    {
+        return std::nullopt;
+    }
+
+    MYSQL_ROW row = mysql_fetch_row(res);
+
+    if (row == nullptr)
+    {
+        mysql_free_result(res);
+        return std::nullopt;
+    }
+
+    ChannelRecord rec {};
+    rec.channelIdx = RowU8(row, 0);
+    rec.name = RowString(row, 1);
+    rec.joinMode = RowU8(row, 2);
+    rec.passphrase = RowString(row, 3);
+    rec.keyHex = RowString(row, 4);
+    rec.enabled = RowU8(row, 5) != 0;
+    rec.isDefault = RowU8(row, 6) != 0;
+    rec.isObserved = RowU8(row, 7) != 0;
+    rec.hasLocalContext = RowU8(row, 8) != 0;
+    rec.syncPending = RowU8(row, 9) != 0;
+    rec.syncAction = RowString(row, 10);
+    rec.syncError = RowString(row, 11);
+    rec.lastSeenEpoch = RowU32(row, 12);
+
+    mysql_free_result(res);
+    return rec;
+}
+
 std::vector<MeshDB::ChannelRecord> MeshDB::ListChannels(bool includeObserved)
 {
     std::vector<ChannelRecord> out;
@@ -2908,4 +3015,78 @@ bool MeshDB::ClearChannelsTable()
     }
 
     return Execute("DELETE FROM channels");
+}
+
+bool MeshDB::StorePushRxLog(const DataConnector::PushRxLogInfo& info, const std::string& summary)
+{
+    std::lock_guard<std::mutex> lock(s_mutex);
+
+    if (!s_ready)
+    {
+        return false;
+    }
+
+    std::ostringstream sql;
+
+    sql
+        << "INSERT INTO rx_log_messages ("
+        << "push_code, route_type, payload_type, payload_version, "
+        << "channel_idx, sender_timestamp, txt_type, message_text, "
+        << "snr_db, rssi_dbm, path_len, path_hash_size, pkt_hash, "
+        << "correlation_key, raw_hex, path_text, "
+        << "advert_valid, advert_public_key, advert_timestamp, advert_role, "
+        << "advert_has_gps, advert_has_ble, advert_has_shortcut, advert_has_name, "
+        << "advert_latitude_e6, advert_longitude_e6, advert_name"
+        << ") VALUES ("
+        << unsigned(info.pushCode) << ", "
+        << unsigned(info.routeType) << ", "
+        << unsigned(info.payloadType) << ", "
+        << unsigned(info.payloadVersion) << ", "
+        << (info.hasChannelIdx ? std::to_string(unsigned(info.channelIdx)) : "NULL") << ", "
+        << (info.hasSenderTimestamp ? std::to_string(info.senderTimestamp) : "NULL") << ", "
+        << (info.hasTxtType ? std::to_string(unsigned(info.txtType)) : "NULL") << ", "
+        << (info.hasMessageText ? ToSqlString(info.messageText) : "NULL") << ", "
+        << (info.hasSnrDb ? std::to_string(info.snrDb) : "NULL") << ", "
+        << (info.hasRssiDbm ? std::to_string(info.rssiDbm) : "NULL") << ", "
+        << (info.hasPathLen ? std::to_string(unsigned(info.pathLen)) : "NULL") << ", "
+        << (info.hasPathHashSize ? std::to_string(unsigned(info.pathHashSize)) : "NULL") << ", "
+        << (info.hasPktHash ? std::to_string(info.pktHash) : "NULL") << ", "
+        << (info.correlationKey.empty() ? "NULL" : ToSqlString(info.correlationKey)) << ", "
+        << (info.rawHex.empty() ? "NULL" : ToSqlString(info.rawHex)) << ", "
+        << (info.pathText.empty() ? "NULL" : ToSqlString(info.pathText)) << ", "
+        << (info.hasAdvert ? (info.advertValid ? "1" : "0") : "NULL") << ", "
+        << (info.hasAdvertPublicKey ? ToSqlString(info.advertPublicKey) : "NULL") << ", "
+        << (info.hasAdvertTimestamp ? std::to_string(info.advertTimestamp) : "NULL") << ", "
+        << (info.hasAdvertRole ? std::to_string(unsigned(info.advertRole)) : "NULL") << ", "
+        << (info.hasAdvertHasGps ? (info.advertHasGps ? "1" : "0") : "NULL") << ", "
+        << (info.hasAdvertHasBle ? (info.advertHasBle ? "1" : "0") : "NULL") << ", "
+        << (info.hasAdvertHasShortcut ? (info.advertHasShortcut ? "1" : "0") : "NULL") << ", "
+        << (info.hasAdvertHasName ? (info.advertHasName ? "1" : "0") : "NULL") << ", "
+        << (info.hasAdvertLatitudeE6 ? std::to_string(info.advertLatitudeE6) : "NULL") << ", "
+        << (info.hasAdvertLongitudeE6 ? std::to_string(info.advertLongitudeE6) : "NULL") << ", "
+        << (info.hasAdvertName ? ToSqlString(info.advertName) : "NULL")
+        << ")";
+
+    if (!Execute(sql.str()))
+    {
+        return false;
+    }
+
+    return InsertEvent(
+        static_cast<uint8_t>(DataConnector::EventType::PushSimple),
+        "push_rx_log",
+        summary,
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        -1,
+        -1,
+        -1,
+        1,
+        0,
+        0,
+        nullptr);
 }
