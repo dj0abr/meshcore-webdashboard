@@ -42,6 +42,7 @@ Das Dashboard bietet unter anderem:
 <p align="center">
 <img src="doku/pic4.png" width="250">
 <img src="doku/pic5.png" width="250">
+<img src="doku/pic6.png" width="250">
 </p>
 
 ------------------------------------------------------------------------
