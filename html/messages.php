@@ -172,7 +172,7 @@ try
 {
     $name = trim((string) ($_GET['name'] ?? ''));
     $kind = trim((string) ($_GET['kind'] ?? ''));
-    $channelIdx = (int) ($_GET['channel_idx'] ?? 0);
+    $channelKeyHex = strtoupper(trim((string) ($_GET['channel_key_hex'] ?? '')));
 
     if ($kind !== 'dm' && $kind !== 'room' && $kind !== 'channel')
     {
@@ -181,9 +181,9 @@ try
 
     if ($kind === 'channel')
     {
-        if ($channelIdx < 0 || $channelIdx > 255)
+        if ($channelKeyHex === '' || !preg_match('/^[0-9A-F]{32}$/', $channelKeyHex))
         {
-            throw new RuntimeException('Ungültige channel_idx.');
+            throw new RuntimeException('Ungültige channel_key_hex.');
         }
 
         $chatKind = 2;
@@ -223,6 +223,7 @@ try
                     cm.name,
                     cm.room_sender_name,
                     cm.channel_idx,
+                    cm.channel_key_hex,
                     cm.`text`,
                     cm.status,
                     cm.tx_outbox_id,
@@ -237,12 +238,13 @@ try
                     tx.room_name,
                     tx.target_name,
                     tx.channel_name,
-                    tx.channel_idx AS tx_channel_idx
+                    tx.channel_idx AS tx_channel_idx,
+                    tx.channel_key_hex AS tx_channel_key_hex
                 FROM chat_messages cm
                 LEFT JOIN tx_outbox tx
                     ON tx.id = cm.tx_outbox_id
                 WHERE cm.chat_kind = 2
-                AND cm.channel_idx = ?
+                AND cm.channel_key_hex = ?
                 ORDER BY cm.timestamp_epoch DESC, cm.id DESC
                 LIMIT 1000
             ) AS recent
@@ -250,7 +252,7 @@ try
         ";
 
         $stmt = $db->prepare($sql);
-        $stmt->bind_param('i', $channelIdx);
+        $stmt->bind_param('s', $channelKeyHex);
     }
     else
     {
@@ -266,6 +268,7 @@ try
                     cm.name,
                     cm.room_sender_name,
                     cm.channel_idx,
+                    cm.channel_key_hex,
                     cm.`text`,
                     cm.status,
                     cm.tx_outbox_id,
@@ -280,7 +283,8 @@ try
                     tx.room_name,
                     tx.target_name,
                     tx.channel_name,
-                    tx.channel_idx AS tx_channel_idx
+                    tx.channel_idx AS tx_channel_idx,
+                    tx.channel_key_hex AS tx_channel_key_hex
                 FROM chat_messages cm
                 LEFT JOIN tx_outbox tx
                     ON tx.id = cm.tx_outbox_id
@@ -306,6 +310,7 @@ try
         $nameDb,
         $roomSenderName,
         $channelIdxDb,
+        $channelKeyHexDb,
         $text,
         $status,
         $txOutboxId,
@@ -320,7 +325,8 @@ try
         $roomName,
         $targetName,
         $txChannelName,
-        $txChannelIdx
+        $txChannelIdx,
+        $txChannelKeyHex
     );
 
     $messages = [];
@@ -366,8 +372,10 @@ try
             'ui_state' => $uiState,
             'ui_status_text' => buildUiStatusText($uiState, $retryCountValue, $lastErrorValue),
             'channel_idx' => $channelIdxDb !== null ? (int) $channelIdxDb : null,
+            'channel_key_hex' => $channelKeyHexDb !== null ? (string) $channelKeyHexDb : null,
             'channel_name' => $txChannelName !== null ? (string) $txChannelName : null,
             'tx_channel_idx' => $txChannelIdx !== null ? (int) $txChannelIdx : null,
+            'tx_channel_key_hex' => $txChannelKeyHex !== null ? (string) $txChannelKeyHex : null,
         ];
     }
 
@@ -378,6 +386,7 @@ try
         [
             'success' => true,
             'name' => $name,
+            'channel_key_hex' => $kind === 'channel' ? $channelKeyHex : null,
             'kind' => $kind,
             'messages' => $messages,
         ],

@@ -829,9 +829,13 @@
 
         .channels-list
         {
+            flex: 1;
+            min-height: 0;
             display: flex;
             flex-direction: column;
             gap: 0.4rem;
+            overflow-y: auto;
+            padding-right: 0.25rem;
         }
 
         .channel-item
@@ -1308,6 +1312,10 @@
         {
             margin: 0;
             cursor: pointer;
+        }
+        .channel-item-meta.channel-has-messages
+        {
+            color: #ffd54f; /* angenehmes gelb */
         }
 </style>
 </head>

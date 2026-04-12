@@ -30,7 +30,8 @@ try
     $messageText = trim((string) ($data['message_text'] ?? ''));
     $maxRetries = (int) ($data['max_retries'] ?? 3);
     $channelName = trim((string) ($data['channel_name'] ?? ''));
-    $channelIdx = (int) ($data['channel_idx'] ?? 0);
+    $channelKeyHex = strtoupper(trim((string) ($data['channel_key_hex'] ?? '')));
+    $channelIdx = null;
 
     if ($txKind !== 0 && $txKind !== 1 && $txKind !== 2 && $txKind !== 3)
     {
@@ -87,9 +88,9 @@ try
     }
     else if ($txKind === 3)
     {
-        if ($channelIdx < 0 || $channelIdx > 255)
+        if ($channelKeyHex === '' || !preg_match('/^[0-9A-F]{32}$/', $channelKeyHex))
         {
-            throw new RuntimeException('Ungültiger Channel-Index.');
+            throw new RuntimeException('Ungültige channel_key_hex.');
         }
 
         if ($channelName !== '' && mb_strlen($channelName, 'UTF-8') > 64)
@@ -110,6 +111,38 @@ try
     $db->set_charset('utf8mb4');
     $db->begin_transaction();
 
+    if ($txKind === 3)
+    {
+        $channelStmt = $db->prepare('
+            SELECT channel_idx, name, enabled
+            FROM channels
+            WHERE key_hex = ?
+            LIMIT 1
+        ');
+        $channelStmt->bind_param('s', $channelKeyHex);
+        $channelStmt->execute();
+        $channelResult = $channelStmt->get_result();
+        $channelRow = $channelResult->fetch_assoc();
+        $channelStmt->close();
+
+        if (!$channelRow)
+        {
+            throw new RuntimeException('Channel mit dieser channel_key_hex wurde nicht gefunden.');
+        }
+
+        if ((int) $channelRow['enabled'] !== 1)
+        {
+            throw new RuntimeException('Channel ist deaktiviert.');
+        }
+
+        $channelIdx = (int) $channelRow['channel_idx'];
+
+        if ($channelName === '')
+        {
+            $channelName = trim((string) ($channelRow['name'] ?? ''));
+        }
+    }
+
     $sql = "
         INSERT INTO tx_outbox
         (
@@ -120,6 +153,7 @@ try
             room_node_id,
             channel_name,
             channel_idx,
+            channel_key_hex,
             message_text,
             status,
             retry_count,
@@ -135,6 +169,7 @@ try
             ?,
             NULLIF(?, ''),
             ?,
+            NULLIF(?, ''),
             ?,
             0,
             0,
@@ -145,7 +180,7 @@ try
 
     $stmt = $db->prepare($sql);
     $stmt->bind_param(
-        'isisssisi',
+        'isisisissi',
         $txKind,
         $targetName,
         $targetNodeId,
@@ -153,6 +188,7 @@ try
         $roomNodeId,
         $channelName,
         $channelIdx,
+        $channelKeyHex,
         $messageText,
         $maxRetries
     );
@@ -168,18 +204,21 @@ try
             $chatKind = 0;
             $chatName = $targetName;
             $chatChannelIdx = null;
+            $chatChannelKeyHex = null;
         }
         else if ($txKind === 1)
         {
             $chatKind = 1;
             $chatName = $roomName;
             $chatChannelIdx = null;
+            $chatChannelKeyHex = null;
         }
         else
         {
             $chatKind = 2;
             $chatName = ($channelName !== '') ? $channelName : ('ch' . $channelIdx);
             $chatChannelIdx = $channelIdx;
+            $chatChannelKeyHex = $channelKeyHex;
         }
 
         $chatSql = "
@@ -190,6 +229,7 @@ try
                 chat_kind,
                 name,
                 channel_idx,
+                channel_key_hex,
                 `text`,
                 status,
                 tx_outbox_id
@@ -202,6 +242,7 @@ try
                 ?,
                 ?,
                 ?,
+                ?,
                 0,
                 ?
             )
@@ -209,10 +250,11 @@ try
 
         $chatStmt = $db->prepare($chatSql);
         $chatStmt->bind_param(
-            'isisi',
+            'isissi',
             $chatKind,
             $chatName,
             $chatChannelIdx,
+            $chatChannelKeyHex,
             $messageText,
             $txOutboxId
         );
@@ -236,6 +278,7 @@ try
             'message_text' => $messageText,
             'channel_name' => $channelName,
             'channel_idx' => $channelIdx,
+            'channel_key_hex' => ($channelKeyHex !== '') ? $channelKeyHex : null,
         ],
         JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES
     );

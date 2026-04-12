@@ -34,7 +34,7 @@ function resolvePathToken(mysqli_stmt $stmt, string $token): array
 {
     $matches = [];
 
-    if (!preg_match('/^[0-9a-f]{1,3}$/', $token))
+    if (!preg_match('/^(?:[0-9a-f]{2}|[0-9a-f]{4}|[0-9a-f]{6})$/', $token))
     {
         return $matches;
     }

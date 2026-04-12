@@ -6,8 +6,6 @@
 #include <optional>
 #include <vector>
 #include <ctime>
-#include <cstdlib>
-#include <optional>
 
 MYSQL* MeshDB::s_conn = nullptr;
 MeshDB::Config MeshDB::s_config {};
@@ -120,12 +118,13 @@ namespace
         tx.roomNodeId = RowU32(row, 5);
         tx.channelName = RowString(row, 6);
         tx.channelIdx = RowU8(row, 7);
-        tx.messageText = RowString(row, 8);
-        tx.retryCount = RowU8(row, 9);
-        tx.maxRetries = RowU8(row, 10);
-        tx.senderTimestamp = RowU32(row, 11);
-        tx.currentAckHex = RowString(row, 12);
-        tx.suggestedTimeoutMs = RowU32(row, 13);
+        tx.channelKeyHex = RowString(row, 8);
+        tx.messageText = RowString(row, 9);
+        tx.retryCount = RowU8(row, 10);
+        tx.maxRetries = RowU8(row, 11);
+        tx.senderTimestamp = RowU32(row, 12);
+        tx.currentAckHex = RowString(row, 13);
+        tx.suggestedTimeoutMs = RowU32(row, 14);
 
         return tx;
     }
@@ -373,6 +372,9 @@ bool MeshDB::EnsureDatabaseExists()
     return Execute(oss.str());
 }
 
+// channel_idx = runtime slot (not stable)
+// key_hex     = stable channel identity
+
 bool MeshDB::EnsureSchema()
 {
     const char* sqlNodes =
@@ -398,69 +400,6 @@ bool MeshDB::EnsureSchema()
         "    KEY idx_nodes_last_advert_at (last_advert_at)"
         ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4";
 
-    const char* sqlMessages =
-        "CREATE TABLE IF NOT EXISTS messages ("
-        "    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,"
-        "    received_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,"
-        "    is_channel TINYINT(1) NOT NULL,"
-        "    channel_idx INT UNSIGNED DEFAULT NULL,"
-        "    from_name VARCHAR(64) NOT NULL,"
-        "    room_sender_name VARCHAR(64) DEFAULT NULL,"
-        "    sender_prefix6_hex CHAR(12) DEFAULT NULL,"
-        "    sender_timestamp INT UNSIGNED DEFAULT NULL,"
-        "    snr_db FLOAT DEFAULT NULL,"
-        "    path_len TINYINT UNSIGNED DEFAULT NULL,"
-        "    txt_type TINYINT UNSIGNED DEFAULT NULL,"
-        "    message_text TEXT NOT NULL,"
-        "    correlation_key CHAR(64) DEFAULT NULL,"
-        "    PRIMARY KEY (id),"
-        "    KEY idx_messages_received_at (received_at),"
-        "    KEY idx_messages_is_channel (is_channel),"
-        "    KEY idx_messages_channel_idx (channel_idx),"
-        "    KEY idx_messages_sender_prefix6_hex (sender_prefix6_hex),"
-        "    KEY idx_messages_correlation_key (correlation_key)"
-        ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4";
-
-    const char* sqlEvents =
-        "CREATE TABLE IF NOT EXISTS events ("
-        "    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,"
-        "    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,"
-        "    event_type TINYINT UNSIGNED NOT NULL,"
-        "    event_name VARCHAR(32) NOT NULL,"
-        "    name VARCHAR(64) DEFAULT NULL,"
-        "    prefix6_hex CHAR(12) DEFAULT NULL,"
-        "    public_key_hex CHAR(64) DEFAULT NULL,"
-        "    ack_hex CHAR(8) DEFAULT NULL,"
-        "    tag_hex CHAR(8) DEFAULT NULL,"
-        "    auth_code_hex CHAR(8) DEFAULT NULL,"
-        "    payload_len INT DEFAULT NULL,"
-        "    rtt_ms INT DEFAULT NULL,"
-        "    flags INT DEFAULT NULL,"
-        "    is_valid TINYINT(1) DEFAULT NULL,"
-        "    adv_lat_e6 INT DEFAULT NULL,"
-        "    adv_lon_e6 INT DEFAULT NULL,"
-        "    summary TEXT NOT NULL DEFAULT '',"
-        "    PRIMARY KEY (id),"
-        "    KEY idx_events_created_at (created_at),"
-        "    KEY idx_events_event_type (event_type),"
-        "    KEY idx_events_prefix6_hex (prefix6_hex),"
-        "    KEY idx_events_public_key_hex (public_key_hex)"
-        ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4";
-
-    const char* sqlTraceHops =
-        "CREATE TABLE IF NOT EXISTS event_trace_hops ("
-        "    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,"
-        "    event_id BIGINT UNSIGNED NOT NULL,"
-        "    hop_index SMALLINT UNSIGNED NOT NULL,"
-        "    path_hash_hex CHAR(2) NOT NULL,"
-        "    snr_db FLOAT DEFAULT NULL,"
-        "    PRIMARY KEY (id),"
-        "    UNIQUE KEY uq_event_trace_hop (event_id, hop_index),"
-        "    CONSTRAINT fk_event_trace_hops_event "
-        "        FOREIGN KEY (event_id) REFERENCES events(id)"
-        "        ON DELETE CASCADE"
-        ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4";
-
     const char* sqlTxOutbox =
         "CREATE TABLE IF NOT EXISTS tx_outbox ("
         "    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,"
@@ -473,6 +412,7 @@ bool MeshDB::EnsureSchema()
         "    room_node_id INT UNSIGNED DEFAULT NULL,"
         "    channel_name VARCHAR(64) DEFAULT NULL,"
         "    channel_idx INT UNSIGNED DEFAULT NULL,"
+        "    channel_key_hex CHAR(32) DEFAULT NULL,"
         "    message_text TEXT NOT NULL,"
         "    status TINYINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '0=queued,1=waiting_ack,2=failed,3=done',"
         "    retry_count TINYINT UNSIGNED NOT NULL DEFAULT 0,"
@@ -493,7 +433,8 @@ bool MeshDB::EnsureSchema()
         "    KEY idx_tx_outbox_target_node_id (target_node_id),"
         "    KEY idx_tx_outbox_room_node_id (room_node_id),"
         "    KEY idx_tx_outbox_channel_name (channel_name),"
-        "    KEY idx_tx_outbox_channel_idx (channel_idx)"
+        "    KEY idx_tx_outbox_channel_idx (channel_idx),"
+        "    KEY idx_tx_outbox_channel_key_hex (channel_key_hex)"
         ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4";
         
     const char* sqlRoomCredentials =
@@ -514,7 +455,7 @@ bool MeshDB::EnsureSchema()
         "    name VARCHAR(64) NOT NULL,"
         "    join_mode TINYINT UNSIGNED NOT NULL DEFAULT 0,"
         "    passphrase VARCHAR(128) DEFAULT NULL,"
-        "    key_hex CHAR(64) DEFAULT NULL,"
+        "    key_hex CHAR(32) DEFAULT NULL,"
         "    enabled TINYINT(1) NOT NULL DEFAULT 1,"
         "    is_default TINYINT(1) NOT NULL DEFAULT 0,"
         "    is_observed TINYINT(1) NOT NULL DEFAULT 0,"
@@ -526,13 +467,14 @@ bool MeshDB::EnsureSchema()
         "    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,"
         "    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,"
         "    PRIMARY KEY (id),"
-        "    UNIQUE KEY uq_channels_idx (channel_idx),"
+        "    UNIQUE KEY uq_channels_key_hex (key_hex),"        
         "    KEY idx_channels_name (name),"
         "    KEY idx_channels_observed (is_observed),"
         "    KEY idx_channels_enabled (enabled),"
         "    KEY idx_channels_sync_pending (sync_pending),"
         "    KEY idx_channels_sync_action (sync_action),"
-        "    KEY idx_channels_local_context (has_local_context)"
+        "    KEY idx_channels_local_context (has_local_context),"
+        "    KEY idx_channels_channel_idx (channel_idx)"
         ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4";
         
         const char* sqlChatMessages =
@@ -544,12 +486,15 @@ bool MeshDB::EnsureSchema()
             "    name VARCHAR(64) NOT NULL,"
             "    room_sender_name VARCHAR(64) DEFAULT NULL,"
             "    channel_idx INT UNSIGNED DEFAULT NULL,"
+            "    channel_key_hex CHAR(32) DEFAULT NULL,"
             "    peer_node_id INT UNSIGNED DEFAULT NULL,"
             "    room_node_id INT UNSIGNED DEFAULT NULL,"
             "    text TEXT NOT NULL,"
             "    status TINYINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '0=received,1=queued,2=sent,3=failed',"
             "    tx_outbox_id BIGINT UNSIGNED DEFAULT NULL,"
             "    sender_prefix6_hex CHAR(12) DEFAULT NULL,"
+            "    sender_timestamp INT UNSIGNED DEFAULT NULL,"
+            "    txt_type TINYINT UNSIGNED DEFAULT NULL,"
             "    snr_db FLOAT DEFAULT NULL,"
             "    path_len TINYINT UNSIGNED DEFAULT NULL,"
             "    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,"
@@ -557,6 +502,7 @@ bool MeshDB::EnsureSchema()
             "    PRIMARY KEY (id),"
             "    KEY idx_chat_messages_conv (chat_kind, name, timestamp_epoch),"
             "    KEY idx_chat_messages_channel (channel_idx, timestamp_epoch),"
+            "    KEY idx_chat_messages_channel_key (channel_key_hex, timestamp_epoch),"
             "    KEY idx_chat_messages_tx_outbox_id (tx_outbox_id),"
             "    KEY idx_chat_messages_correlation_key (correlation_key)"
             ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4";
@@ -653,9 +599,6 @@ bool MeshDB::EnsureSchema()
             ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4";
             
     return Execute(sqlNodes)
-        && Execute(sqlMessages)
-        && Execute(sqlEvents)
-        && Execute(sqlTraceHops)
         && Execute(sqlTxOutbox)
         && Execute(sqlRoomCredentials)
         && Execute(sqlChannels)
@@ -743,62 +686,6 @@ std::string MeshDB::ToSqlDateTimeFromU32(uint32_t epoch)
 std::string MeshDB::BoolToSql(bool value)
 {
     return value ? "1" : "0";
-}
-
-bool MeshDB::InsertEvent(
-    uint8_t eventType,
-    const std::string& eventName,
-    const std::string& summary,
-    const std::string& name,
-    const std::string& prefix6Hex,
-    const std::string& publicKeyHex,
-    const std::string& ackHex,
-    const std::string& tagHex,
-    const std::string& authCodeHex,
-    int payloadLen,
-    int rttMs,
-    int flags,
-    int isValid,
-    int advLatE6,
-    int advLonE6,
-    unsigned long long* insertedId)
-{
-    std::ostringstream oss;
-
-    oss
-        << "INSERT INTO events ("
-        << "event_type, event_name, name, prefix6_hex, public_key_hex, ack_hex, "
-        << "tag_hex, auth_code_hex, payload_len, rtt_ms, flags, is_valid, "
-        << "adv_lat_e6, adv_lon_e6, summary"
-        << ") VALUES ("
-        << unsigned(eventType) << ", "
-        << ToSqlString(eventName) << ", "
-        << ToSqlNullableString(name) << ", "
-        << ToSqlNullableString(prefix6Hex) << ", "
-        << ToSqlNullableString(publicKeyHex) << ", "
-        << ToSqlNullableString(ackHex) << ", "
-        << ToSqlNullableString(tagHex) << ", "
-        << ToSqlNullableString(authCodeHex) << ", "
-        << ((payloadLen >= 0) ? std::to_string(payloadLen) : "NULL") << ", "
-        << ((rttMs >= 0) ? std::to_string(rttMs) : "NULL") << ", "
-        << ((flags >= 0) ? std::to_string(flags) : "NULL") << ", "
-        << ((isValid >= 0) ? std::to_string(isValid) : "NULL") << ", "
-        << (((advLatE6 != 0) || (advLonE6 != 0)) ? std::to_string(advLatE6) : "NULL") << ", "
-        << (((advLatE6 != 0) || (advLonE6 != 0)) ? std::to_string(advLonE6) : "NULL") << ", "
-        << ToSqlString(summary)
-        << ")";
-
-    if (!Execute(oss.str()))
-    {
-        return false;
-    }
-
-    if (insertedId != nullptr)
-    {
-        *insertedId = mysql_insert_id(s_conn);
-    }
-
-    return true;
 }
 
 bool MeshDB::UpsertNodeFromAdvert(const DataConnector::AdvertInfo& info)
@@ -965,26 +852,8 @@ bool MeshDB::StoreAdvert(const DataConnector::AdvertInfo& info, const std::strin
         return false;
     }
 
-    const std::string publicKeyHex =
-        DataConnector::hexBytes(info.publicKey.data(), info.publicKey.size());
-
-    return InsertEvent(
-        static_cast<uint8_t>(DataConnector::EventType::Advert),
-        "advert",
-        summary,
-        info.name,
-        "",
-        publicKeyHex,
-        "",
-        "",
-        "",
-        -1,
-        -1,
-        static_cast<int>(info.flags),
-        1,
-        static_cast<int>(info.advLatE6),
-        static_cast<int>(info.advLonE6),
-        nullptr);
+    (void)summary;
+    return true;
 }
 
 bool MeshDB::MessageAlreadyStoredUnlocked(
@@ -999,28 +868,66 @@ bool MeshDB::MessageAlreadyStoredUnlocked(
     std::ostringstream sql;
 
     sql
-        << "SELECT id FROM messages WHERE "
-        << "is_channel = " << BoolToSql(info.isChannel) << " AND ";
+        << "SELECT id FROM chat_messages WHERE "
+        << "direction = 0 AND ";
 
     if (info.isChannel)
     {
-        sql
-            << "channel_idx = " << unsigned(info.channelIdx) << " AND ";
+        std::string channelKeyHex;
+
+        if (auto rec = FindChannelByIdxUnlockedImpl(info.channelIdx); rec.has_value())
+        {
+            channelKeyHex = rec->keyHex;
+        }
+
+        sql << "chat_kind = 2 AND ";
+
+        if (!channelKeyHex.empty())
+        {
+            sql
+                << "channel_key_hex = " << ToSqlString(channelKeyHex) << " AND ";
+        }
+        else
+        {
+            sql
+                << "channel_idx = " << unsigned(info.channelIdx) << " AND ";
+        }
     }
     else
     {
         sql
-            << "sender_prefix6_hex = " << ToSqlNullableString(prefix6Hex) << " AND ";
+            << "chat_kind IN (0,1) AND ";
+
+        if (!prefix6Hex.empty())
+        {
+            sql
+                << "sender_prefix6_hex = "
+                << ToSqlString(prefix6Hex)
+                << " AND ";
+        }
+        else
+        {
+            sql
+                << "sender_prefix6_hex IS NULL AND ";
+        }
+    }
+
+    if (info.senderTimestamp != 0)
+    {
+        sql
+            << "sender_timestamp = "
+            << std::to_string(info.senderTimestamp)
+            << " AND ";
+    }
+    else
+    {
+        sql
+            << "sender_timestamp IS NULL AND ";
     }
 
     sql
-        << "sender_timestamp = "
-        << ((info.senderTimestamp != 0)
-            ? std::to_string(info.senderTimestamp)
-            : "NULL")
-        << " AND "
         << "txt_type = " << unsigned(info.txtType) << " AND "
-        << "message_text = " << ToSqlString(info.text)
+        << "text = " << ToSqlString(info.text)
         << " LIMIT 1";
 
     if (mysql_query(s_conn, sql.str().c_str()) != 0)
@@ -1066,33 +973,6 @@ bool MeshDB::StoreMessage(const DataConnector::MessageInfo& info, const std::str
         std::cout << "[MeshDB] StoreMessage: duplicate RX ignored\n";
         return true;
     }
-
-    std::ostringstream msgSql;
-
-    msgSql
-        << "INSERT INTO messages ("
-        << "is_channel, channel_idx, from_name, room_sender_name, "
-        << "sender_prefix6_hex, sender_timestamp, snr_db, path_len, txt_type, message_text, correlation_key"
-        << ") VALUES ("
-        << BoolToSql(info.isChannel) << ", "
-        << (info.isChannel ? std::to_string(unsigned(info.channelIdx)) : "NULL") << ", "
-        << ToSqlString(info.fromName) << ", "
-        << (info.roomSenderName.empty() ? "NULL" : ToSqlString(info.roomSenderName)) << ", "
-        << ToSqlNullableString(prefix6Hex) << ", "
-        << ((info.senderTimestamp != 0) ? std::to_string(info.senderTimestamp) : "NULL") << ", "
-        << (std::isnan(info.snrDb) ? "NULL" : std::to_string(info.snrDb)) << ", "
-        << ((info.pathLen == 255) ? "NULL" : std::to_string(unsigned(info.pathLen))) << ", "
-        << unsigned(info.txtType) << ", "
-        << ToSqlString(info.text) << ", "
-        << (info.correlationKey.empty() ? "NULL" : ToSqlString(info.correlationKey))
-        << ")";
-
-    if (!Execute(msgSql.str()))
-    {
-        return false;
-    }
-
-    std::cout << "[MeshDB] StoreMessage: inserted into messages\n";
    
     const std::uint64_t nowEpoch =
         static_cast<std::uint64_t>(std::time(nullptr));
@@ -1112,6 +992,9 @@ bool MeshDB::StoreMessage(const DataConnector::MessageInfo& info, const std::str
             chatKind = 2U;
             break;
     }
+    std::string channelKeyHex;
+    std::string conversationName;
+
     if (info.kind == DataConnector::MessageInfo::Kind::Channel)
     {
         if (!MarkChannelObservedUnlocked(info.channelIdx))
@@ -1119,27 +1002,39 @@ bool MeshDB::StoreMessage(const DataConnector::MessageInfo& info, const std::str
             std::cout << "[MeshDB] StoreMessage: MarkChannelObservedUnlocked FAILED\n";
             return false;
         }
-    }
-    const unsigned direction = 0U;                        // 0=rx
-    const unsigned status = 1U;                           // 1=confirmed
 
-    std::string conversationName;
+        if (auto rec = FindChannelByIdxUnlockedImpl(info.channelIdx); rec.has_value())
+        {
+            channelKeyHex = rec->keyHex;
 
-    if (info.kind == DataConnector::MessageInfo::Kind::Channel)
-    {
-        conversationName = "ch" + std::to_string(unsigned(info.channelIdx));
+            if (!rec->name.empty())
+            {
+                conversationName = rec->name;
+            }
+            else
+            {
+                conversationName = "ch" + std::to_string(unsigned(info.channelIdx));
+            }
+        }
+        else
+        {
+            conversationName = "ch" + std::to_string(unsigned(info.channelIdx));
+        }
     }
     else
     {
         conversationName = info.fromName;
     }
 
+    const unsigned direction = 0U;                        // 0=rx
+    const unsigned status = 1U;                           // 1=confirmed
+
     std::ostringstream chatSql;
 
     chatSql
         << "INSERT INTO chat_messages ("
-        << "timestamp_epoch, direction, chat_kind, name, room_sender_name, channel_idx, peer_node_id, room_node_id, "
-        << "text, status, tx_outbox_id, sender_prefix6_hex, snr_db, path_len, correlation_key"
+        << "timestamp_epoch, direction, chat_kind, name, room_sender_name, channel_idx, channel_key_hex, peer_node_id, room_node_id, "
+        << "text, status, tx_outbox_id, sender_prefix6_hex, sender_timestamp, txt_type, snr_db, path_len, correlation_key"
         << ") VALUES ("
         << nowEpoch << ", "
         << direction << ", "
@@ -1149,12 +1044,17 @@ bool MeshDB::StoreMessage(const DataConnector::MessageInfo& info, const std::str
         << ((info.kind == DataConnector::MessageInfo::Kind::Channel)
             ? std::to_string(unsigned(info.channelIdx))
             : "NULL") << ", "
+        << ((info.kind == DataConnector::MessageInfo::Kind::Channel && !channelKeyHex.empty())
+            ? ToSqlString(channelKeyHex)
+            : "NULL") << ", "
         << "NULL, "
         << "NULL, "
         << ToSqlString(info.text) << ", "
         << status << ", "
         << "NULL, "
         << ToSqlNullableString(prefix6Hex) << ", "
+        << ((info.senderTimestamp != 0) ? std::to_string(info.senderTimestamp) : "NULL") << ", "
+        << unsigned(info.txtType) << ", "
         << (std::isnan(info.snrDb) ? "NULL" : std::to_string(info.snrDb)) << ", "
         << ((info.pathLen == 255) ? "NULL" : std::to_string(unsigned(info.pathLen))) << ", "
         << (info.correlationKey.empty() ? "NULL" : ToSqlString(info.correlationKey))
@@ -1167,24 +1067,8 @@ bool MeshDB::StoreMessage(const DataConnector::MessageInfo& info, const std::str
     }
 
     std::cout << "[MeshDB] StoreMessage: inserted into chat_messages\n";
-
-    return InsertEvent(
-        static_cast<uint8_t>(DataConnector::EventType::Message),
-        "message",
-        summary,
-        info.fromName,
-        prefix6Hex,
-        "",
-        "",
-        "",
-        "",
-        -1,
-        -1,
-        -1,
-        1,
-        0,
-        0,
-        nullptr);
+    (void)summary;
+    return true;
 }
 
 bool MeshDB::StorePushAdvert(const DataConnector::PushAdvertInfo& info, const std::string& summary)
@@ -1205,23 +1089,8 @@ bool MeshDB::StorePushAdvert(const DataConnector::PushAdvertInfo& info, const st
         ? DataConnector::hexBytes(info.prefix6.data(), info.prefix6.size())
         : "";
 
-    return InsertEvent(
-        static_cast<uint8_t>(DataConnector::EventType::PushAdvert),
-        "push_advert",
-        summary,
-        info.valid ? info.name : "",
-        prefix6Hex,
-        "",
-        "",
-        "",
-        "",
-        static_cast<int>(info.payloadLen),
-        -1,
-        -1,
-        info.valid ? 1 : 0,
-        0,
-        0,
-        nullptr);
+    (void)summary;
+    return true;
 }
 
 bool MeshDB::StorePushPathUpdated(const DataConnector::PushPathUpdatedInfo& info, const std::string& summary)
@@ -1242,150 +1111,7 @@ bool MeshDB::StorePushPathUpdated(const DataConnector::PushPathUpdatedInfo& info
         ? DataConnector::hexBytes(info.publicKey.data(), info.publicKey.size())
         : "";
 
-    return InsertEvent(
-        static_cast<uint8_t>(DataConnector::EventType::PushPathUpdated),
-        "push_path_updated",
-        summary,
-        "",
-        "",
-        publicKeyHex,
-        "",
-        "",
-        "",
-        static_cast<int>(info.payloadLen),
-        -1,
-        -1,
-        info.valid ? 1 : 0,
-        0,
-        0,
-        nullptr);
-}
-
-bool MeshDB::StorePushSendConfirmed(const DataConnector::PushSendConfirmedInfo& info, const std::string& summary)
-{
-    std::lock_guard<std::mutex> lock(s_mutex);
-
-    if (!s_ready)
-    {
-        return false;
-    }
-
-    const std::string ackHex = info.valid
-        ? DataConnector::u32hex(info.ack)
-        : "";
-
-    return InsertEvent(
-        static_cast<uint8_t>(DataConnector::EventType::PushSendConfirmed),
-        "push_send_confirmed",
-        summary,
-        "",
-        "",
-        "",
-        ackHex,
-        "",
-        "",
-        static_cast<int>(info.payloadLen),
-        info.valid ? static_cast<int>(info.rttMs) : -1,
-        -1,
-        info.valid ? 1 : 0,
-        0,
-        0,
-        nullptr);
-}
-
-bool MeshDB::StorePushSimple(const DataConnector::PushSimpleInfo& info, const std::string& summary)
-{
-    std::lock_guard<std::mutex> lock(s_mutex);
-
-    if (!s_ready)
-    {
-        return false;
-    }
-
-    return InsertEvent(
-        static_cast<uint8_t>(DataConnector::EventType::PushSimple),
-        info.label,
-        summary,
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        static_cast<int>(info.payloadLen),
-        -1,
-        -1,
-        1,
-        0,
-        0,
-        nullptr);
-}
-
-bool MeshDB::StorePushTrace(const DataConnector::PushTraceInfo& info, const std::string& summary)
-{
-    std::lock_guard<std::mutex> lock(s_mutex);
-
-    if (!s_ready)
-    {
-        return false;
-    }
-
-    unsigned long long eventId = 0;
-
-    if (!InsertEvent(
-            static_cast<uint8_t>(DataConnector::EventType::PushTrace),
-            "push_trace",
-            summary,
-            "",
-            "",
-            "",
-            "",
-            info.valid ? DataConnector::u32hex(info.tag) : "",
-            info.valid ? DataConnector::u32hex(info.authCode) : "",
-            static_cast<int>(info.payloadLen),
-            -1,
-            info.valid ? static_cast<int>(info.flags) : -1,
-            info.valid ? 1 : 0,
-            0,
-            0,
-            &eventId))
-    {
-        return false;
-    }
-
-    if (!info.valid)
-    {
-        return true;
-    }
-
-    const size_t hopCount = info.pathHashes.size();
-
-    for (size_t i = 0; i < hopCount; i++)
-    {
-        std::ostringstream hopSql;
-        hopSql
-            << "INSERT INTO event_trace_hops (event_id, hop_index, path_hash_hex, snr_db) VALUES ("
-            << eventId << ", "
-            << i << ", "
-            << ToSqlString(DataConnector::hexBytes(&info.pathHashes[i], 1)) << ", ";
-
-        if (i < info.snrDb.size())
-        {
-            hopSql << info.snrDb[i];
-        }
-        else
-        {
-            hopSql << "NULL";
-        }
-
-        hopSql << ")";
-
-        if (!Execute(hopSql.str()))
-        {
-            return false;
-        }
-    }
-
+    (void)summary;
     return true;
 }
 
@@ -1407,23 +1133,8 @@ bool MeshDB::StorePushNewAdvert(const DataConnector::PushNewAdvertInfo& info, co
         ? DataConnector::hexBytes(info.prefix6.data(), info.prefix6.size())
         : "";
 
-    return InsertEvent(
-        static_cast<uint8_t>(DataConnector::EventType::PushNewAdvert),
-        "push_new_advert",
-        summary,
-        info.valid ? info.name : "",
-        prefix6Hex,
-        "",
-        "",
-        "",
-        "",
-        static_cast<int>(info.payloadLen),
-        -1,
-        -1,
-        info.valid ? 1 : 0,
-        info.valid ? static_cast<int>(info.advLatE6) : 0,
-        info.valid ? static_cast<int>(info.advLonE6) : 0,
-        nullptr);
+    (void)summary;
+    return true;
 }
 
 bool MeshDB::StorePushUnknown(const DataConnector::PushUnknownInfo& info, const std::string& summary)
@@ -1435,23 +1146,9 @@ bool MeshDB::StorePushUnknown(const DataConnector::PushUnknownInfo& info, const 
         return false;
     }
 
-    return InsertEvent(
-        static_cast<uint8_t>(DataConnector::EventType::PushUnknown),
-        "push_unknown",
-        summary,
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        static_cast<int>(info.payloadLen),
-        -1,
-        static_cast<int>(info.code),
-        1,
-        0,
-        0,
-        nullptr);
+    (void)info;
+    (void)summary;
+    return true;
 }
 
 std::string MeshDB::SanitizeUtf8(const std::string& value)
@@ -1550,6 +1247,7 @@ std::optional<MeshDB::OutgoingTx> MeshDB::FetchNextQueuedTx()
         "    COALESCE(room_node_id, 0), "
         "    COALESCE(channel_name, ''), "
         "    COALESCE(channel_idx, 0), "
+        "    COALESCE(channel_key_hex, ''), "
         "    message_text, "
         "    retry_count, "
         "    max_retries, "
@@ -1612,6 +1310,7 @@ std::vector<MeshDB::OutgoingTx> MeshDB::FetchTimedOutWaitingTx(unsigned int limi
         << "    COALESCE(room_node_id, 0), "
         << "    COALESCE(channel_name, ''), "
         << "    COALESCE(channel_idx, 0), "
+        << "    COALESCE(channel_key_hex, ''), "
         << "    message_text, "
         << "    retry_count, "
         << "    max_retries, "
@@ -1860,11 +1559,8 @@ bool MeshDB::ClearAllTables()
     }
 
     bool ok =
-        Execute("TRUNCATE TABLE event_trace_hops") &&
         Execute("TRUNCATE TABLE discover_results") &&
         Execute("TRUNCATE TABLE discover_jobs") &&
-        Execute("TRUNCATE TABLE events") &&
-        Execute("TRUNCATE TABLE messages") &&
         Execute("TRUNCATE TABLE nodes") &&
         Execute("TRUNCATE TABLE channels") &&
         Execute("TRUNCATE TABLE tx_outbox");
@@ -2052,19 +1748,37 @@ bool MeshDB::MarkChannelObservedUnlocked(uint8_t channelIdx)
         return false;
     }
 
-    std::ostringstream sql;
-    sql
+    {
+        std::ostringstream updateSql;
+        updateSql
+            << "UPDATE channels SET "
+            << "is_observed = 1, "
+            << "last_seen_at = NOW() "
+            << "WHERE channel_idx = " << unsigned(channelIdx) << " "
+            << "ORDER BY has_local_context DESC, id ASC "
+            << "LIMIT 1";
+
+        if (!Execute(updateSql.str()))
+        {
+            return false;
+        }
+
+        if (mysql_affected_rows(s_conn) > 0)
+        {
+            return true;
+        }
+    }
+
+    std::ostringstream insertSql;
+    insertSql
         << "INSERT INTO channels ("
         << "channel_idx, name, is_observed, has_local_context, enabled, last_seen_at"
         << ") VALUES ("
         << unsigned(channelIdx) << ", "
         << ToSqlString("Channel " + std::to_string(unsigned(channelIdx))) << ", "
-        << "1, 0, 0, NOW()) "
-        << "ON DUPLICATE KEY UPDATE "
-        << "is_observed = 1, "
-        << "last_seen_at = NOW()";
+        << "1, 0, 0, NOW())";
 
-    return Execute(sql.str());
+    return Execute(insertSql.str());
 }
 
 bool MeshDB::MarkChannelObserved(uint8_t channelIdx)
@@ -2109,12 +1823,14 @@ bool MeshDB::UpsertLocalChannel(
         << "0, '', '', "
         << "NOW()"
         << ") ON DUPLICATE KEY UPDATE "
+        << "channel_idx = VALUES(channel_idx), "
         << "name = VALUES(name), "
         << "join_mode = VALUES(join_mode), "
         << "passphrase = VALUES(passphrase), "
         << "key_hex = VALUES(key_hex), "
         << "enabled = VALUES(enabled), "
         << "is_default = VALUES(is_default), "
+        << "is_observed = 0, "
         << "has_local_context = 1, "
         << "sync_pending = 0, "
         << "sync_action = '', "
@@ -2124,7 +1840,70 @@ bool MeshDB::UpsertLocalChannel(
     return Execute(sql.str());
 }
 
+std::optional<MeshDB::ChannelRecord> MeshDB::FindChannelByIdxUnlockedImpl(uint8_t channelIdx)
+{
+    if (!MeshDB::s_ready || (MeshDB::s_conn == nullptr))
+    {
+        return std::nullopt;
+    }
+
+    std::ostringstream sql;
+
+    sql
+        << "SELECT channel_idx, name, join_mode, passphrase, key_hex, "
+        << "enabled, is_default, is_observed, has_local_context, "
+        << "sync_pending, sync_action, sync_error, "
+        << "UNIX_TIMESTAMP(last_seen_at) "
+        << "FROM channels WHERE channel_idx = " << unsigned(channelIdx)
+        << " LIMIT 1";
+
+    if (mysql_query(MeshDB::s_conn, sql.str().c_str()) != 0)
+    {
+        std::cerr << "MeshDB SQL error: " << mysql_error(MeshDB::s_conn) << "\n";
+        return std::nullopt;
+    }
+
+    MYSQL_RES* res = mysql_store_result(MeshDB::s_conn);
+
+    if (res == nullptr)
+    {
+        return std::nullopt;
+    }
+
+    MYSQL_ROW row = mysql_fetch_row(res);
+
+    if (row == nullptr)
+    {
+        mysql_free_result(res);
+        return std::nullopt;
+    }
+
+    MeshDB::ChannelRecord rec {};
+    rec.channelIdx = RowU8(row, 0);
+    rec.name = RowString(row, 1);
+    rec.joinMode = RowU8(row, 2);
+    rec.passphrase = RowString(row, 3);
+    rec.keyHex = RowString(row, 4);
+    rec.enabled = RowU8(row, 5) != 0;
+    rec.isDefault = RowU8(row, 6) != 0;
+    rec.isObserved = RowU8(row, 7) != 0;
+    rec.hasLocalContext = RowU8(row, 8) != 0;
+    rec.syncPending = RowU8(row, 9) != 0;
+    rec.syncAction = RowString(row, 10);
+    rec.syncError = RowString(row, 11);
+    rec.lastSeenEpoch = RowU32(row, 12);
+
+    mysql_free_result(res);
+    return rec;
+}
+
 std::optional<MeshDB::ChannelRecord> MeshDB::FindChannelByIdx(uint8_t channelIdx)
+{
+    std::lock_guard<std::mutex> lock(s_mutex);
+    return FindChannelByIdxUnlockedImpl(channelIdx);
+}
+
+std::optional<MeshDB::ChannelRecord> MeshDB::FindChannelByKeyHex(const std::string& keyHex)
 {
     std::lock_guard<std::mutex> lock(s_mutex);
 
@@ -2140,9 +1919,9 @@ std::optional<MeshDB::ChannelRecord> MeshDB::FindChannelByIdx(uint8_t channelIdx
         << "enabled, is_default, is_observed, has_local_context, "
         << "sync_pending, sync_action, sync_error, "
         << "UNIX_TIMESTAMP(last_seen_at) "
-        << "FROM channels WHERE channel_idx = " << unsigned(channelIdx)
+        << "FROM channels WHERE key_hex = " << ToSqlString(keyHex)
         << " LIMIT 1";
-        
+
     if (mysql_query(s_conn, sql.str().c_str()) != 0)
     {
         std::cerr << "MeshDB SQL error: " << mysql_error(s_conn) << "\n";
@@ -3072,21 +2851,153 @@ bool MeshDB::StorePushRxLog(const DataConnector::PushRxLogInfo& info, const std:
         return false;
     }
 
-    return InsertEvent(
-        static_cast<uint8_t>(DataConnector::EventType::PushSimple),
-        "push_rx_log",
-        summary,
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        -1,
-        -1,
-        -1,
-        1,
-        0,
-        0,
-        nullptr);
+    (void)summary;
+    return true;
+}
+
+std::vector<std::string> MeshDB::ListNodeNamesMissingAdvertLocation()
+{
+    std::lock_guard<std::mutex> lock(s_mutex);
+
+    std::vector<std::string> out;
+
+    if (!s_ready || (s_conn == nullptr))
+    {
+        return out;
+    }
+
+    const char* sql =
+        "SELECT DISTINCT name "
+        "FROM nodes "
+        "WHERE name IS NOT NULL "
+        "  AND name <> '' "
+        "  AND (adv_lat_e6 IS NULL OR adv_lon_e6 IS NULL)";
+
+    if (mysql_query(s_conn, sql) != 0)
+    {
+        std::cerr << "MeshDB SQL error: " << mysql_error(s_conn) << "\n";
+        return out;
+    }
+
+    MYSQL_RES* res = mysql_store_result(s_conn);
+
+    if (res == nullptr)
+    {
+        return out;
+    }
+
+    MYSQL_ROW row = nullptr;
+
+    while ((row = mysql_fetch_row(res)) != nullptr)
+    {
+        const std::string name = RowStr(row, 0);
+
+        if (!name.empty())
+        {
+            out.push_back(name);
+        }
+    }
+
+    mysql_free_result(res);
+    return out;
+}
+
+bool MeshDB::UpdateNodeAdvertLocationByName(
+    const std::string& name,
+    int32_t advLatE6,
+    int32_t advLonE6)
+{
+    std::lock_guard<std::mutex> lock(s_mutex);
+
+    if (!s_ready || (s_conn == nullptr))
+    {
+        return false;
+    }
+
+    std::ostringstream sql;
+    sql
+        << "UPDATE nodes "
+        << "SET adv_lat_e6 = " << advLatE6 << ", "
+        << "    adv_lon_e6 = " << advLonE6 << " "
+        << "WHERE name = " << ToSqlString(name) << " "
+        << "  AND (adv_lat_e6 IS NULL OR adv_lon_e6 IS NULL)";
+
+    return Execute(sql.str());
+}
+
+bool MeshDB::MarkChannelSyncErrorByKeyHex(const std::string& keyHex, const std::string& errorText)
+{
+    std::lock_guard<std::mutex> lock(s_mutex);
+
+    if (!s_ready || (s_conn == nullptr))
+    {
+        return false;
+    }
+
+    std::ostringstream sql;
+    sql
+        << "UPDATE channels SET "
+        << "sync_pending = 0, "
+        << "sync_action = '', "
+        << "sync_error = " << ToSqlString(errorText) << " "
+        << "WHERE key_hex = " << ToSqlString(keyHex)
+        << " LIMIT 1";
+
+    return Execute(sql.str());
+}
+
+bool MeshDB::MarkChannelDeletePendingByKeyHex(const std::string& keyHex)
+{
+    std::lock_guard<std::mutex> lock(s_mutex);
+
+    if (!s_ready || (s_conn == nullptr))
+    {
+        return false;
+    }
+
+    std::ostringstream sql;
+    sql
+        << "UPDATE channels SET "
+        << "sync_pending = 1, "
+        << "sync_action = 'delete', "
+        << "sync_error = '' "
+        << "WHERE key_hex = " << ToSqlString(keyHex)
+        << " LIMIT 1";
+
+    return Execute(sql.str());
+}
+
+bool MeshDB::DeleteChannelByKeyHex(const std::string& keyHex)
+{
+    std::lock_guard<std::mutex> lock(s_mutex);
+
+    if (!s_ready || (s_conn == nullptr))
+    {
+        return false;
+    }
+
+    std::ostringstream sql1;
+    sql1
+        << "UPDATE channels SET "
+        << "has_local_context = 0, "
+        << "enabled = 0, "
+        << "is_default = 0, "
+        << "sync_pending = 0, "
+        << "sync_action = '', "
+        << "sync_error = '' "
+        << "WHERE key_hex = " << ToSqlString(keyHex);
+
+    if (!Execute(sql1.str()))
+    {
+        return false;
+    }
+
+    std::ostringstream sql2;
+    sql2
+        << "DELETE FROM channels "
+        << "WHERE key_hex = " << ToSqlString(keyHex)
+        << " AND has_local_context = 0"
+        << " AND is_observed = 0";
+
+    return Execute(sql2.str());
 }

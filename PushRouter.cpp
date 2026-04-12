@@ -29,7 +29,7 @@ void PushRouter::Attach()
 
 void PushRouter::HandlePush(uint8_t code, const std::vector<uint8_t>& payload)
 {
-    //printf("********************************* [HandlePush] code: %02X\n",code);
+    //if(code >= 0x80) printf("********************************* [HandlePush] code: %02X\n",code);
 
     switch (code)
     {
@@ -197,8 +197,8 @@ void PushRouter::HandleLogRxData(const std::vector<uint8_t>& payload)
     const MeshRxLogDecoder::DecodedPacket pkt =
         MeshRxLogDecoder::Decode(payload);
 
-    // Pakete mit Payload Type 0 und 1 (REQ, RESPONSE) sind uninteressant
-    if(pkt.payloadType == 0 || pkt.payloadType == 1 || pkt.payloadType == 7)
+    // Payload 5 = Grp-Text, also Messages, alles anere ist uninteressant (zumindest vorerst)
+    if(pkt.payloadType != 5)
         return;
 
     DataConnector::PushRxLogInfo info {};

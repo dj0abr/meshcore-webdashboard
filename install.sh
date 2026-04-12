@@ -15,4 +15,6 @@ rsync \
 unzip \
 pkg-config \
 cmake \
+libcurl4-openssl-dev \
+libtinyxml2-dev \
 git

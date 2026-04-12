@@ -57,33 +57,26 @@ function deriveHashtagKeyHex(string $name): string
     return strtoupper(substr(hash('sha256', $name), 0, 32));
 }
 
-function findChannelByNameAndKey(mysqli $db, string $name, string $keyHex): ?array
+function findChannelByKeyHex(mysqli $db, string $keyHex): ?array
 {
     $stmt = $db->prepare('
-        SELECT channel_idx, name, join_mode, enabled, is_default, is_observed, has_local_context
+        SELECT
+            channel_idx,
+            name,
+            join_mode,
+            enabled,
+            is_default,
+            is_observed,
+            has_local_context,
+            key_hex,
+            sync_pending,
+            sync_action,
+            sync_error
         FROM channels
-        WHERE name = ? AND key_hex = ?
+        WHERE key_hex = ?
         LIMIT 1
     ');
-    $stmt->bind_param('ss', $name, $keyHex);
-    $stmt->execute();
-
-    $result = $stmt->get_result();
-    $row = $result->fetch_assoc();
-    $stmt->close();
-
-    return $row ?: null;
-}
-
-function findChannelByIdx(mysqli $db, int $channelIdx): ?array
-{
-    $stmt = $db->prepare('
-        SELECT channel_idx, name, join_mode, enabled, is_default, is_observed, has_local_context
-        FROM channels
-        WHERE channel_idx = ?
-        LIMIT 1
-    ');
-    $stmt->bind_param('i', $channelIdx);
+    $stmt->bind_param('s', $keyHex);
     $stmt->execute();
 
     $result = $stmt->get_result();
@@ -130,13 +123,19 @@ function upsertChannel(
     bool $isDefault
 ): void
 {
-    $existing = findChannelByIdx($db, $channelIdx);
+    $existing = findChannelByKeyHex($db, $keyHex);
+
+    $enabledInt = $enabled ? 1 : 0;
+    $isDefaultInt = $isDefault ? 1 : 0;
+    $syncAction = 'upsert';
+    $syncError = '';
 
     if ($existing !== null)
     {
         $sql = '
             UPDATE channels
             SET
+                channel_idx = ?,
                 name = ?,
                 join_mode = ?,
                 key_hex = ?,
@@ -147,19 +146,14 @@ function upsertChannel(
                 sync_action = ?,
                 sync_error = ?,
                 last_seen_at = NOW()
-            WHERE channel_idx = ?
+            WHERE key_hex = ?
             LIMIT 1
         ';
 
         $stmt = $db->prepare($sql);
-
-        $enabledInt = $enabled ? 1 : 0;
-        $isDefaultInt = $isDefault ? 1 : 0;
-        $syncAction = 'upsert';
-        $syncError = '';
-
         $stmt->bind_param(
-            'sisiissi',
+            'isisiisss',
+            $channelIdx,
             $name,
             $joinMode,
             $keyHex,
@@ -167,10 +161,11 @@ function upsertChannel(
             $isDefaultInt,
             $syncAction,
             $syncError,
-            $channelIdx
+            $keyHex
         );
         $stmt->execute();
         $stmt->close();
+
         return;
     }
 
@@ -198,12 +193,6 @@ function upsertChannel(
     ';
 
     $stmt = $db->prepare($sql);
-
-    $enabledInt = $enabled ? 1 : 0;
-    $isDefaultInt = $isDefault ? 1 : 0;
-    $syncAction = 'upsert';
-    $syncError = '';
-
     $stmt->bind_param(
         'isisiiss',
         $channelIdx,
@@ -240,6 +229,7 @@ function ensurePublicChannel(mysqli $db): array
     [
         'type' => 'channel',
         'channel_idx' => $channelIdx,
+        'key_hex' => $keyHex,
         'name' => $name,
         'enabled' => true,
         'is_default' => true,
@@ -295,7 +285,7 @@ try
             $keyHex = strtoupper(bin2hex(random_bytes(16)));
             $returnSecretKey = $keyHex;
 
-            $existing = findChannelByNameAndKey($db, $channelName, $keyHex);
+            $existing = findChannelByKeyHex($db, $keyHex);
 
             if ($existing !== null)
             {
@@ -315,7 +305,7 @@ try
             $joinMode = 2;
             $keyHex = normalizeHexKey($secretKey);
 
-            $existing = findChannelByNameAndKey($db, $channelName, $keyHex);
+            $existing = findChannelByKeyHex($db, $keyHex);
 
             if ($existing !== null)
             {
@@ -348,7 +338,7 @@ try
                 );
             }
 
-            $existing = findChannelByNameAndKey($db, $channelName, $keyHex);
+            $existing = findChannelByKeyHex($db, $keyHex);
 
             if ($existing !== null)
             {
@@ -374,7 +364,7 @@ try
             $joinMode = 1;
             $keyHex = deriveHashtagKeyHex($channelName);
 
-            $existing = findChannelByNameAndKey($db, $channelName, $keyHex);
+            $existing = findChannelByKeyHex($db, $keyHex);
 
             if ($existing !== null)
             {
@@ -409,6 +399,7 @@ try
             [
                 'type' => 'channel',
                 'channel_idx' => $channelIdx,
+                'key_hex' => $keyHex,
                 'name' => $channelName,
                 'enabled' => true,
                 'is_default' => $isDefault,

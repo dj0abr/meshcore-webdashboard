@@ -9,7 +9,9 @@ Backend und GUI kommunizieren über eine Datenbank.
 #include "AppRuntime.h"
 #include "PushRouter.h"
 #include "MessageRouter.h"
+#include "CallsignLocationBackfillThread.h"
 
+#include <cstdlib>
 #include <chrono>
 #include <iostream>
 #include <string>
@@ -80,12 +82,19 @@ int main(int argc, char** argv)
 
     std::cout << "MeshCore Backend running on " << port << ". CTRL+C to exit.\n";
 
-
     runtime.CheckAndApplyCompanionConfig(true);
 
-    /*runtime.CreatePublicChannel("abc123xyz");
-    runtime.CreatePublicChannel("#berlin");
-    runtime.CreatePrivateChannel("privat1", "00112233445566778899aabbccddeeff");*/
+    // Starte Callsign Positionsergänzung
+    CallsignLocationBackfillThread::Config backfillCfg;
+    if (const char* v = std::getenv("MESHCORE_QRZ_USER"); v != nullptr)
+        backfillCfg.locationConfig.qrzUsername = v;
+    if (const char* v = std::getenv("MESHCORE_QRZ_PASS"); v != nullptr)
+        backfillCfg.locationConfig.qrzPassword = v;
+    backfillCfg.locationConfig.sessionCacheFile = "qrz_session_cache.txt";
+    backfillCfg.runInterval = std::chrono::hours(24);
+    backfillCfg.delayBetweenLookups = std::chrono::milliseconds(1500);
+    CallsignLocationBackfillThread callsignBackfill(backfillCfg);
+    callsignBackfill.Start();
 
     while (mc.isConnected())
     {

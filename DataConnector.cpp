@@ -1,5 +1,7 @@
 #include "DataConnector.h"
 #include "MeshDB.h"
+#include "MeshRxLogDecoder.h"
+
 #include <iostream>
 #include <iomanip>
 #include <sstream>
@@ -344,7 +346,7 @@ std::string DataConnector::FormatPush(const PushRxLogInfo& info)
 
     oss
         << " routeType=" << unsigned(info.routeType)
-        << " payloadType=" << unsigned(info.payloadType)
+        << " payloadType=" << MeshRxLogDecoder::PayloadTypeToString(info.payloadType)
         << " payloadVersion=" << unsigned(info.payloadVersion);
 
     if (info.hasChannelIdx)
@@ -471,21 +473,18 @@ void DataConnector::Emit(const PushPathUpdatedInfo& info)
 void DataConnector::Emit(const PushSendConfirmedInfo& info)
 {
     const std::string line = FormatPush(info);
-    MeshDB::StorePushSendConfirmed(info, line);
     EmitFormatted(GetEventType(info), line);
 }
 
 void DataConnector::Emit(const PushSimpleInfo& info)
 {
     const std::string line = FormatPush(info);
-    MeshDB::StorePushSimple(info, line);
     EmitFormatted(GetEventType(info), line);
 }
 
 void DataConnector::Emit(const PushTraceInfo& info)
 {
     const std::string line = FormatPush(info);
-    MeshDB::StorePushTrace(info, line);
     EmitFormatted(GetEventType(info), line);
 }
 

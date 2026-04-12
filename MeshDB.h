@@ -57,6 +57,7 @@ public:
 
         uint8_t channelIdx = 0;
         std::string channelName;
+        std::string channelKeyHex;
 
         std::string messageText;
         uint8_t retryCount = 0;
@@ -153,9 +154,6 @@ public:
 
     static bool StorePushAdvert(const DataConnector::PushAdvertInfo& info, const std::string& summary);
     static bool StorePushPathUpdated(const DataConnector::PushPathUpdatedInfo& info, const std::string& summary);
-    static bool StorePushSendConfirmed(const DataConnector::PushSendConfirmedInfo& info, const std::string& summary);
-    static bool StorePushSimple(const DataConnector::PushSimpleInfo& info, const std::string& summary);
-    static bool StorePushTrace(const DataConnector::PushTraceInfo& info, const std::string& summary);
     static bool StorePushNewAdvert(const DataConnector::PushNewAdvertInfo& info, const std::string& summary);
     static bool StorePushUnknown(const DataConnector::PushUnknownInfo& info, const std::string& summary);
 
@@ -215,11 +213,14 @@ public:
         bool isDefault);
 
     static std::optional<ChannelRecord> FindChannelByIdx(uint8_t channelIdx);
+    static std::optional<ChannelRecord> FindChannelByIdxUnlockedImpl(uint8_t channelIdx);
+    static std::optional<ChannelRecord> FindChannelByKeyHex(const std::string& keyHex);
     static std::optional<ChannelRecord> FindChannelByName(const std::string& channelName);
     static std::vector<ChannelRecord> ListChannels(bool includeObserved);
     static bool MarkChannelObserved(uint8_t channelIdx);
     static bool MarkChannelObservedUnlocked(uint8_t channelIdx);
     static bool DeleteChannel(uint8_t channelIdx);
+    static bool DeleteChannelByKeyHex(const std::string& keyHex);
     static bool ClearChannelsTable();
 
     static bool SaveCompanionConfig(
@@ -244,9 +245,16 @@ public:
     static std::string ResolveChannelDisplayName(uint8_t channelIdx);  
     static std::vector<ChannelRecord> ListPendingChannelSync();
     static bool MarkChannelSyncError(uint8_t channelIdx, const std::string& errorText);
+    static bool MarkChannelSyncErrorByKeyHex(const std::string& keyHex, const std::string& errorText);
     static bool MarkChannelDeletePending(uint8_t channelIdx);
+    static bool MarkChannelDeletePendingByKeyHex(const std::string& keyHex);
     static bool StorePushRxLog(const DataConnector::PushRxLogInfo& info, const std::string& summary);
-    
+    static std::vector<std::string> ListNodeNamesMissingAdvertLocation();
+    static bool UpdateNodeAdvertLocationByName(
+        const std::string& name,
+        int32_t advLatE6,
+        int32_t advLonE6);
+
 private:
 
     static bool ConnectServer();
@@ -265,24 +273,6 @@ private:
     static bool MessageAlreadyStoredUnlocked(
             const DataConnector::MessageInfo& info,
             const std::string& prefix6Hex);
-
-    static bool InsertEvent(
-        uint8_t eventType,
-        const std::string& eventName,
-        const std::string& summary,
-        const std::string& name,
-        const std::string& prefix6Hex,
-        const std::string& publicKeyHex,
-        const std::string& ackHex,
-        const std::string& tagHex,
-        const std::string& authCodeHex,
-        int payloadLen,
-        int rttMs,
-        int flags,
-        int isValid,
-        int advLatE6,
-        int advLonE6,
-        unsigned long long* insertedId);
 
     static bool UpsertNodeFromAdvert(const DataConnector::AdvertInfo& info);
     static bool UpsertNodeFromPushAdvert(const DataConnector::PushAdvertInfo& info);

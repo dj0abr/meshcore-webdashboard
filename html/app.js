@@ -144,7 +144,7 @@ function consoledebug()
         return;
     }
 
-    consoledebug(...arguments);
+    console.debug(...arguments);
 }
 
 function ensureChatPathMap()
@@ -212,8 +212,7 @@ function buildPreferredPathMapPoints(preferredPath)
             hop &&
             hop.resolved &&
             hop.node &&
-            Number.isFinite(Number(hop.node.adv_lat_e6)) &&
-            Number.isFinite(Number(hop.node.adv_lon_e6))
+            hasValidCoords(hop.node)
         )
         {
             points.push(
@@ -233,8 +232,7 @@ function buildPreferredPathMapPoints(preferredPath)
 
     if (
         preferredPath.endpoint &&
-        Number.isFinite(Number(preferredPath.endpoint.latitude_e6)) &&
-        Number.isFinite(Number(preferredPath.endpoint.longitude_e6))
+        hasValidEndpointCoords(preferredPath.endpoint)
     )
     {
         points.push(
@@ -989,7 +987,8 @@ function getNodeLatLon(row)
     const valid =
         Number.isFinite(lat) &&
         Number.isFinite(lon) &&
-        !(lat === 0 && lon === 0);
+        lat !== 0 &&
+        lon !== 0;
 
     if (!valid)
     {
@@ -2160,7 +2159,13 @@ function hasValidCoords(node)
         return false;
     }
 
-    return Number.isFinite(Number(node.adv_lat_e6)) && Number.isFinite(Number(node.adv_lon_e6));
+    const lat = Number(node.adv_lat_e6);
+    const lon = Number(node.adv_lon_e6);
+
+    return Number.isFinite(lat) &&
+        Number.isFinite(lon) &&
+        lat !== 0 &&
+        lon !== 0;
 }
 
 function hasValidEndpointCoords(endpoint)
@@ -2170,7 +2175,13 @@ function hasValidEndpointCoords(endpoint)
         return false;
     }
 
-    return Number.isFinite(Number(endpoint.latitude_e6)) && Number.isFinite(Number(endpoint.longitude_e6));
+    const lat = Number(endpoint.latitude_e6);
+    const lon = Number(endpoint.longitude_e6);
+
+    return Number.isFinite(lat) &&
+        Number.isFinite(lon) &&
+        lat !== 0 &&
+        lon !== 0;
 }
 
 function e6ToDegrees(value)
@@ -2746,7 +2757,7 @@ async function loadChatMessages(row, keepScrollIfPossible = true)
     if (chatKind === "channel")
     {
         url =
-            `messages.php?kind=channel&channel_idx=${encodeURIComponent(Number(row.channel_idx || 0))}&_=${Date.now()}`;
+            `messages.php?kind=channel&channel_key_hex=${encodeURIComponent(String(row.key_hex || ""))}&_=${Date.now()}`;
     }
     else
     {
@@ -3159,7 +3170,7 @@ function buildOutgoingPayload(row, messageText)
         return {
             tx_kind: 3,
             channel_name: row.name || "",
-            channel_idx: Number(row.channel_idx || 0),
+            channel_key_hex: String(row.key_hex || ""),
             message_text: messageText,
             max_retries: 3
         };
@@ -3309,7 +3320,7 @@ function renderChannelsList()
         if (
             state.chatRow &&
             state.chatRow.type === "channel" &&
-            Number(state.chatRow.channel_idx || 0) === channelIdx
+            String(state.chatRow.key_hex || "") === String(channel.key_hex || "")
         )
         {
             btn.classList.add("active");
@@ -3336,14 +3347,27 @@ function renderChannelsList()
         {
             metaParts.push(tr("channel.meta.disabled", "disabled"));
         }
-
+    
         if (channel.has_local_context)
         {
             metaParts.push(tr("channel.meta.local", "local"));
         }
 
+        const messageCount = Number(channel.message_count || 0);
+        const messageLabel = messageCount === 1
+            ? tr("channel.meta.message_singular", "Nachricht")
+            : tr("channel.meta.message_plural", "Nachrichten");
+
+        metaParts.push(String(messageCount) + " " + messageLabel);
+
         const metaEl = document.createElement("span");
         metaEl.className = "channel-item-meta";
+
+        if (messageCount > 0)
+        {
+            metaEl.classList.add("channel-has-messages");
+        }
+
         metaEl.textContent = metaParts.join(" • ");
         btn.appendChild(metaEl);
 
@@ -3353,6 +3377,7 @@ function renderChannelsList()
             {
                 type: "channel",
                 name: channelName,
+                key_hex: String(channel.key_hex || ""),
                 channel_idx: channelIdx,
                 enabled: !!channel.enabled,
                 is_observed: !!channel.is_observed,
@@ -3633,7 +3658,7 @@ async function saveChannel(payload)
     });
 }
 
-async function deleteChannel(channelIdx)
+async function deleteChannel(keyHex)
 {
     return await fetchJson("delete_channel.php",
     {
@@ -3645,7 +3670,7 @@ async function deleteChannel(channelIdx)
         },
         body: JSON.stringify(
         {
-            channel_idx: Number(channelIdx || 0)
+            key_hex: String(keyHex || "")
         })
     });
 }
@@ -3735,12 +3760,12 @@ async function handleChannelDialogConfirm()
                 throw new Error(tr("channel.none_selected", "Kein Channel ausgewählt."));
             }
 
-            await deleteChannel(selected.channel_idx);
+            await deleteChannel(selected.key_hex);
 
             if (
                 state.chatRow &&
                 isChannelRow(state.chatRow) &&
-                Number(state.chatRow.channel_idx || 0) === Number(selected.channel_idx || 0)
+                String(state.chatRow.key_hex || "") === String(selected.key_hex || "")
             )
             {
                 showEmptyRightPanel();
@@ -3770,6 +3795,7 @@ async function handleChannelDialogConfirm()
             {
                 type: "channel",
                 name: result.channel.name || ("Channel " + String(result.channel.channel_idx || "")),
+                key_hex: String(result.channel.key_hex || ""),
                 channel_idx: Number(result.channel.channel_idx || 0),
                 enabled: !!result.channel.enabled,
                 is_observed: !!result.channel.is_observed,

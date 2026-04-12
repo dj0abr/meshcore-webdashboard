@@ -22,16 +22,11 @@ try
     }
 
     $data = json_decode($raw, true, 512, JSON_THROW_ON_ERROR);
-    $channelIdx = (int) ($data['channel_idx'] ?? 0);
+    $keyHex = strtoupper(trim((string) ($data['key_hex'] ?? '')));
 
-    if ($channelIdx < 0 || $channelIdx > 255)
+    if ($keyHex === '' || !preg_match('/^[0-9A-F]{32}$/', $keyHex))
     {
-        throw new RuntimeException('Ungültige channel_idx.');
-    }
-
-    if ($channelIdx === 0)
-    {
-        throw new RuntimeException('Der Default Channel kann nicht gelöscht werden.');
+        throw new RuntimeException('Ungültige key_hex.');
     }
 
     $db = new mysqli(
@@ -48,10 +43,10 @@ try
     $stmt = $db->prepare('
         SELECT is_default, has_local_context
         FROM channels
-        WHERE channel_idx = ?
+        WHERE key_hex = ?
         LIMIT 1
     ');
-    $stmt->bind_param('i', $channelIdx);
+    $stmt->bind_param('s', $keyHex);
     $stmt->execute();
     $stmt->bind_result($isDefault, $hasLocalContext);
 
@@ -72,11 +67,11 @@ try
     {
         $stmt = $db->prepare('
             DELETE FROM channels
-            WHERE channel_idx = ?
+            WHERE key_hex = ?
               AND has_local_context = 0
             LIMIT 1
         ');
-        $stmt->bind_param('i', $channelIdx);
+        $stmt->bind_param('s', $keyHex);
         $stmt->execute();
         $deletedRows = $stmt->affected_rows;
         $stmt->close();
@@ -86,7 +81,7 @@ try
         jsonResponse(
             [
                 'success' => true,
-                'channel_idx' => $channelIdx,
+                'key_hex' => $keyHex,
                 'delete_requested' => false,
                 'deleted_local_record' => $deletedRows > 0
             ]
@@ -102,10 +97,10 @@ try
             sync_pending = 1,
             sync_action = ?,
             sync_error = ?
-        WHERE channel_idx = ?
+        WHERE key_hex = ?
         LIMIT 1
     ');
-    $stmt->bind_param('ssi', $syncAction, $syncError, $channelIdx);
+    $stmt->bind_param('sss', $syncAction, $syncError, $keyHex);
     $stmt->execute();
     $updatedRows = $stmt->affected_rows;
     $stmt->close();
@@ -115,7 +110,7 @@ try
     jsonResponse(
         [
             'success' => true,
-            'channel_idx' => $channelIdx,
+            'key_hex' => $keyHex,
             'delete_requested' => $updatedRows > 0
         ]
     );

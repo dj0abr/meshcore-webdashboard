@@ -27,25 +27,37 @@ try
 
     $sql = "
         SELECT
-            channel_idx,
-            name,
-            enabled,
-            is_default,
-            is_observed,
-            has_local_context,
-            sync_pending,
-            sync_action,
-            sync_error,
-            UNIX_TIMESTAMP(last_seen_at) AS last_seen_epoch
-        FROM channels
-        WHERE NOT (sync_pending = 1 AND sync_action = 'delete')
+            c.channel_idx,
+            c.key_hex,
+            c.name,
+            c.enabled,
+            c.is_default,
+            c.is_observed,
+            c.has_local_context,
+            c.sync_pending,
+            c.sync_action,
+            c.sync_error,
+            UNIX_TIMESTAMP(c.last_seen_at) AS last_seen_epoch,
+            COALESCE(cm.message_count, 0) AS message_count
+        FROM channels c
+        LEFT JOIN
+        (
+            SELECT
+                channel_key_hex,
+                COUNT(*) AS message_count
+            FROM chat_messages
+            WHERE chat_kind = 2
+              AND channel_key_hex IS NOT NULL
+            GROUP BY channel_key_hex
+        ) cm
+            ON cm.channel_key_hex = c.key_hex
+        WHERE NOT (c.sync_pending = 1 AND c.sync_action = 'delete')
         ORDER BY
-            is_default DESC,
-            enabled DESC,
-            is_observed ASC,
-            channel_idx ASC
+            c.is_default DESC,
+            c.enabled DESC,
+            c.is_observed ASC,
+            c.channel_idx ASC
     ";
-
     $result = $db->query($sql);
 
     $channels = [];
@@ -56,6 +68,7 @@ try
         [
             'type' => 'channel',
             'channel_idx' => (int) $row['channel_idx'],
+            'key_hex' => isset($row['key_hex']) ? (string) $row['key_hex'] : '',
             'name' => (string) $row['name'],
             'enabled' => (int) $row['enabled'] === 1,
             'is_default' => (int) $row['is_default'] === 1,
@@ -65,6 +78,7 @@ try
             'sync_action' => (string) $row['sync_action'],
             'sync_error' => (string) $row['sync_error'],
             'last_seen_epoch' => $row['last_seen_epoch'] !== null ? (int) $row['last_seen_epoch'] : null,
+            'message_count' => isset($row['message_count']) ? (int) $row['message_count'] : 0,
         ];
     }
 
