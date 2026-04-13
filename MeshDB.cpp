@@ -467,14 +467,14 @@ bool MeshDB::EnsureSchema()
         "    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,"
         "    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,"
         "    PRIMARY KEY (id),"
-        "    UNIQUE KEY uq_channels_key_hex (key_hex),"        
+        "    UNIQUE KEY uq_channels_key_hex (key_hex),"
+        "    UNIQUE KEY uq_channels_channel_idx (channel_idx),"
         "    KEY idx_channels_name (name),"
         "    KEY idx_channels_observed (is_observed),"
         "    KEY idx_channels_enabled (enabled),"
         "    KEY idx_channels_sync_pending (sync_pending),"
         "    KEY idx_channels_sync_action (sync_action),"
-        "    KEY idx_channels_local_context (has_local_context),"
-        "    KEY idx_channels_channel_idx (channel_idx)"
+        "    KEY idx_channels_local_context (has_local_context)"
         ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4";
         
         const char* sqlChatMessages =
@@ -1748,37 +1748,19 @@ bool MeshDB::MarkChannelObservedUnlocked(uint8_t channelIdx)
         return false;
     }
 
-    {
-        std::ostringstream updateSql;
-        updateSql
-            << "UPDATE channels SET "
-            << "is_observed = 1, "
-            << "last_seen_at = NOW() "
-            << "WHERE channel_idx = " << unsigned(channelIdx) << " "
-            << "ORDER BY has_local_context DESC, id ASC "
-            << "LIMIT 1";
-
-        if (!Execute(updateSql.str()))
-        {
-            return false;
-        }
-
-        if (mysql_affected_rows(s_conn) > 0)
-        {
-            return true;
-        }
-    }
-
-    std::ostringstream insertSql;
-    insertSql
+    std::ostringstream sql;
+    sql
         << "INSERT INTO channels ("
         << "channel_idx, name, is_observed, has_local_context, enabled, last_seen_at"
         << ") VALUES ("
         << unsigned(channelIdx) << ", "
         << ToSqlString("Channel " + std::to_string(unsigned(channelIdx))) << ", "
-        << "1, 0, 0, NOW())";
+        << "1, 0, 0, NOW()"
+        << ") ON DUPLICATE KEY UPDATE "
+        << "is_observed = 1, "
+        << "last_seen_at = NOW()";
 
-    return Execute(insertSql.str());
+    return Execute(sql.str());
 }
 
 bool MeshDB::MarkChannelObserved(uint8_t channelIdx)
@@ -1854,8 +1836,9 @@ std::optional<MeshDB::ChannelRecord> MeshDB::FindChannelByIdxUnlockedImpl(uint8_
         << "enabled, is_default, is_observed, has_local_context, "
         << "sync_pending, sync_action, sync_error, "
         << "UNIX_TIMESTAMP(last_seen_at) "
-        << "FROM channels WHERE channel_idx = " << unsigned(channelIdx)
-        << " LIMIT 1";
+        << "FROM channels WHERE channel_idx = " << unsigned(channelIdx) << " "
+        << "ORDER BY has_local_context DESC, id ASC "
+        << "LIMIT 1";
 
     if (mysql_query(MeshDB::s_conn, sql.str().c_str()) != 0)
     {
