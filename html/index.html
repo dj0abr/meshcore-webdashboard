@@ -1402,8 +1402,20 @@
         <section class="panel">
             <div class="panel-header">
                 <div>
-                    <h2 class="panel-title" data-i18n="panel.messages">Messages</h2>
-                    <div class="panel-subtitle"></div>
+                    <h2 id="rightPanelTitle" class="panel-title" data-i18n="panel.messages">MessagesX</h2>
+                    <div id="rightPanelSubtitle" class="panel-subtitle"></div>
+                </div>
+
+                <div id="rightPanelActions" style="display:flex; align-items:center; gap:10px;">
+                    <button
+                        id="resetPathButton"
+                        class="toolbar-button"
+                        type="button"
+                        style="display:none;"
+                        data-i18n="map.reset_path"
+                    >
+                        Pfad löschen
+                    </button>
                 </div>
             </div>
 

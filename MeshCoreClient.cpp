@@ -1931,3 +1931,40 @@ bool MeshCoreClient::syncClock()
 {
     return setTime(nowUtcEpoch());
 }
+
+bool MeshCoreClient::resetPath(const std::array<uint8_t, 32>& publicKey)
+{
+    if (!isConnected())
+    {
+        return false;
+    }
+
+    std::vector<uint8_t> cmd;
+    cmd.reserve(1 + publicKey.size());
+
+    cmd.push_back(MeshCoreProto::CMD_RESET_PATH);
+    cmd.insert(cmd.end(), publicKey.begin(), publicKey.end());
+
+    std::optional<std::vector<uint8_t>> resp;
+
+    {
+        std::lock_guard<std::mutex> apiLock(m_apiMutex);
+        resp = m_link.requestResponseAny(
+            cmd,
+            std::vector<uint8_t>
+            {
+                MeshCoreProto::RESP_CODE_OK,
+                MeshCoreProto::RESP_CODE_ERR
+            },
+            3000
+        );
+    }
+
+    if (!resp.has_value() || resp->empty())
+    {
+        return false;
+    }
+
+    return ((*resp)[0] == MeshCoreProto::RESP_CODE_OK);
+}
+

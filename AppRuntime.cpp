@@ -54,6 +54,30 @@ static bool ParseHex16Local(const std::string& hex, std::array<uint8_t, 16>& out
 
     return true;
 }
+
+static bool ParseHex32Local(const std::string& hex, std::array<uint8_t, 32>& out)
+{
+    if (hex.size() != 64)
+    {
+        return false;
+    }
+
+    for (size_t i = 0; i < 32; i++)
+    {
+        const int hi = HexNibble(hex[i * 2]);
+        const int lo = HexNibble(hex[i * 2 + 1]);
+
+        if (hi < 0 || lo < 0)
+        {
+            return false;
+        }
+
+        out[i] = static_cast<uint8_t>((hi << 4) | lo);
+    }
+
+    return true;
+}
+
 static std::string Hex8(const std::array<uint8_t, 8>& data)
 {
     static const char* hex = "0123456789ABCDEF";
@@ -178,7 +202,8 @@ void AppRuntime::Tick()
         ProcessPendingChannelSync();
         m_nextChannelSyncPollAt = std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
     }
-
+    
+    ProcessCompanionActions();
     ProcessOutgoingQueue();
     ProcessDiscoverQueue();
     ProcessAckTimeouts();
@@ -1379,3 +1404,62 @@ bool AppRuntime::ApplyPendingChannelDelete(const MeshDB::ChannelRecord& rec)
 
     return true;
 }
+
+void AppRuntime::ProcessCompanionActions()
+{
+    while (true)
+    {
+        auto actionOpt = MeshDB::FetchNextQueuedCompanionAction();
+
+        if (!actionOpt.has_value())
+        {
+            break;
+        }
+
+        if (!MeshDB::MarkCompanionActionRunning(actionOpt->id))
+        {
+            break;
+        }
+
+        if (!ProcessSingleCompanionAction(*actionOpt))
+        {
+            break;
+        }
+    }
+}
+
+bool AppRuntime::ProcessSingleCompanionAction(const MeshDB::CompanionAction& action)
+{
+    if (action.actionType == "reset_path")
+    {
+        std::array<uint8_t, 32> publicKey {};
+
+        if (!ParseHex32Local(action.publicKeyHex, publicKey))
+        {
+            MeshDB::MarkCompanionActionFailed(action.id, "invalid public_key_hex");
+            return false;
+        }
+
+        if (!m_client.resetPath(publicKey))
+        {
+            MeshDB::MarkCompanionActionFailed(action.id, "resetPath failed");
+            return false;
+        }
+
+        if (!MeshDB::MarkCompanionActionDone(action.id))
+        {
+            return false;
+        }
+
+        std::cout
+            << "[companion] reset_path done for "
+            << action.publicKeyHex
+            << "\n";
+
+        return true;
+    }
+
+    MeshDB::MarkCompanionActionFailed(action.id, "unknown action_type");
+    return false;
+}
+

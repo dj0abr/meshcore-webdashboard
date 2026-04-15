@@ -170,7 +170,16 @@ const I18N =
         "error.invalid_json": "keine gültige JSON-Antwort",
         "error.http": "HTTP Fehler",
         "error.generic": "Fehler",
-        "room_password.input_placeholder": "Passwort eingeben ..."
+        "room_password.input_placeholder": "Passwort eingeben ...",
+
+        "panel.map": "Map",
+
+        "map.reset_path": "Pfad löschen",
+        "map.reset_path.confirm": "Gespeicherten Pfad für \"{name}\" löschen?",
+        "map.reset_path.invalid_key": "Für diesen Eintrag ist kein gültiger Public Key vorhanden.",
+        "map.reset_path.error": "Fehler beim Löschen des Pfads: {message}",
+
+        "repeater.info.not_implemented": "Repeater-Infos noch nicht implementiert.",
     },
 
     en:
@@ -344,7 +353,16 @@ const I18N =
         "error.invalid_json": "invalid JSON response",
         "error.http": "HTTP error",
         "error.generic": "Error",
-        "room_password.input_placeholder": "Enter password ..."
+        "room_password.input_placeholder": "Enter password ...",
+
+        "panel.map": "Map",
+
+        "map.reset_path": "Clear path",
+        "map.reset_path.confirm": "Delete the stored path for \"{name}\"?",
+        "map.reset_path.invalid_key": "No valid public key is available for this entry.",
+        "map.reset_path.error": "Error clearing path: {message}",
+
+        "repeater.info.not_implemented": "Repeater info not implemented yet.",
     },
 
     es:
@@ -518,7 +536,16 @@ const I18N =
         "error.invalid_json": "respuesta JSON no válida",
         "error.http": "Error HTTP",
         "error.generic": "Error",
-        "room_password.input_placeholder": "Introduce la contraseña ..."
+        "room_password.input_placeholder": "Introduce la contraseña ...",
+
+        "panel.map": "Mapa",
+
+        "map.reset_path": "Eliminar ruta",
+        "map.reset_path.confirm": "¿Eliminar la ruta guardada para \"{name}\"?",
+        "map.reset_path.invalid_key": "No hay una clave pública válida para esta entrada.",
+        "map.reset_path.error": "Error al eliminar la ruta: {message}",
+
+        "repeater.info.not_implemented": "Información del repetidor aún no implementada.",
     },
 
     fr:
@@ -692,8 +719,17 @@ const I18N =
         "error.invalid_json": "réponse JSON invalide",
         "error.http": "Erreur HTTP",
         "error.generic": "Erreur",
-        "room_password.input_placeholder": "Saisissez le mot de passe ..."
-    },
+        "room_password.input_placeholder": "Saisissez le mot de passe ...",
+
+        "panel.map": "Carte",
+
+        "map.reset_path": "Supprimer le chemin",
+        "map.reset_path.confirm": "Supprimer le chemin enregistré pour \"{name}\" ?",
+        "map.reset_path.invalid_key": "Aucune clé publique valide n'est disponible pour cette entrée.",
+        "map.reset_path.error": "Erreur lors de la suppression du chemin : {message}",
+
+        "repeater.info.not_implemented": "Informations du répéteur non encore implémentées.",
+            },
 
     it:
     {
@@ -865,7 +901,16 @@ const I18N =
         "error.invalid_json": "risposta JSON non valida",
         "error.http": "Errore HTTP",
         "error.generic": "Errore",
-        "room_password.input_placeholder": "Inserisci la password ..."
+        "room_password.input_placeholder": "Inserisci la password ...",
+
+        "panel.map": "Carte",
+
+        "map.reset_path": "Supprimer le chemin",
+        "map.reset_path.confirm": "Supprimer le chemin enregistré pour \"{name}\" ?",
+        "map.reset_path.invalid_key": "Aucune clé publique valide n'est disponible pour cette entrée.",
+        "map.reset_path.error": "Erreur lors de la suppression du chemin : {message}",
+
+        "repeater.info.not_implemented": "Informations du répéteur non encore implémentées.",
     }
 };
 

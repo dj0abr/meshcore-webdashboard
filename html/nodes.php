@@ -59,17 +59,21 @@ try
             n.public_key_hex,
             n.prefix6_hex,
             n.last_advert_at,
+            n.first_seen_at,
+            n.updated_at,
+            n.last_mod_at,
+            n.advert_flags,
             n.adv_lat_e6,
             n.adv_lon_e6,
             COUNT(cm.id) AS msg_count
         FROM nodes n
         LEFT JOIN chat_messages cm
             ON cm.name = n.name
-           AND (
+        AND (
                 (n.advert_type = 1 AND cm.chat_kind = 0)
                 OR
                 (n.advert_type = 3 AND cm.chat_kind = 1)
-           )
+        )
     ";
 
     if ($typeFilter === 'chat')
@@ -98,6 +102,10 @@ try
             n.public_key_hex,
             n.prefix6_hex,
             n.last_advert_at,
+            n.first_seen_at,
+            n.updated_at,
+            n.last_mod_at,
+            n.advert_flags,
             n.adv_lat_e6,
             n.adv_lon_e6
         ORDER BY
@@ -120,6 +128,10 @@ try
             'public_key_hex' => $row['public_key_hex'],
             'prefix6_hex' => $row['prefix6_hex'],
             'last_advert_at' => $row['last_advert_at'],
+            'first_seen_at' => $row['first_seen_at'],
+            'updated_at' => $row['updated_at'],
+            'last_mod_at' => $row['last_mod_at'],
+            'advert_flags' => ($row['advert_flags'] !== null) ? (int) $row['advert_flags'] : null,
             'adv_lat' => isset($row['adv_lat_e6']) ? ((int) $row['adv_lat_e6'] / 1000000.0) : null,
             'adv_lon' => isset($row['adv_lon_e6']) ? ((int) $row['adv_lon_e6'] / 1000000.0) : null,
             'msg_count' => (int) $row['msg_count'],

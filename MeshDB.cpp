@@ -597,7 +597,21 @@ bool MeshDB::EnsureSchema()
             "    KEY idx_rx_log_advert_public_key (advert_public_key),"
             "    KEY idx_rx_log_advert_name (advert_name)"
             ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4";
-            
+    const char* sqlCompanionActions =
+        "CREATE TABLE IF NOT EXISTS companion_actions ("
+        "    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,"
+        "    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,"
+        "    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,"
+        "    processed_at DATETIME DEFAULT NULL,"
+        "    action_type VARCHAR(32) NOT NULL,"
+        "    public_key_hex CHAR(64) DEFAULT NULL,"
+        "    status TINYINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '0=queued,1=running,2=failed,3=done',"
+        "    error_text VARCHAR(255) DEFAULT NULL,"
+        "    PRIMARY KEY (id),"
+        "    KEY idx_companion_actions_status_created (status, created_at),"
+        "    KEY idx_companion_actions_action_type (action_type),"
+        "    KEY idx_companion_actions_public_key_hex (public_key_hex)"
+        ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4";
     return Execute(sqlNodes)
         && Execute(sqlTxOutbox)
         && Execute(sqlRoomCredentials)
@@ -606,6 +620,7 @@ bool MeshDB::EnsureSchema()
         && Execute(sqlRxLogMessages)
         && Execute(sqlCompanionConfig)
         && Execute(sqlDiscoverJobs)
+        && Execute(sqlCompanionActions)
         && Execute(sqlDiscoverResults);
 }
 
@@ -701,9 +716,9 @@ bool MeshDB::UpsertNodeFromAdvert(const DataConnector::AdvertInfo& info)
 
     std::ostringstream oss;
 
-    oss
+        oss
         << "INSERT INTO nodes ("
-        << "node_id, advert_type, advert_flags, name, public_key_hex, prefix6_hex, last_advert_at, adv_lat_e6, adv_lon_e6"
+        << "node_id, advert_type, advert_flags, name, public_key_hex, prefix6_hex, last_advert_at, first_seen_at, adv_lat_e6, adv_lon_e6"
         << ") VALUES ("
         << info.nodeId << ", "
         << unsigned(info.type) << ", "
@@ -711,6 +726,7 @@ bool MeshDB::UpsertNodeFromAdvert(const DataConnector::AdvertInfo& info)
         << ToSqlString(info.name) << ", "
         << ToSqlString(publicKeyHex) << ", "
         << ToSqlString(prefix6Hex) << ", "
+        << ToSqlDateTime(lastAdvert) << ", "
         << ToSqlDateTime(lastAdvert) << ", ";
 
     if (hasLocation)
@@ -780,7 +796,7 @@ bool MeshDB::UpsertNodeFromPushNewAdvert(const DataConnector::PushNewAdvertInfo&
 
     oss
         << "INSERT INTO nodes ("
-        << "node_id, advert_type, advert_flags, name, public_key_hex, prefix6_hex, last_advert_at, last_mod_at, adv_lat_e6, adv_lon_e6"
+        << "node_id, advert_type, advert_flags, name, public_key_hex, prefix6_hex, last_advert_at, last_mod_at, first_seen_at, adv_lat_e6, adv_lon_e6"
         << ") VALUES ("
         << info.nodeId << ", "
         << unsigned(info.type) << ", "
@@ -789,7 +805,8 @@ bool MeshDB::UpsertNodeFromPushNewAdvert(const DataConnector::PushNewAdvertInfo&
         << ToSqlString(publicKeyHex) << ", "
         << ToSqlString(prefix6Hex) << ", "
         << ToSqlDateTimeFromU32(info.lastAdvert) << ", "
-        << ToSqlDateTimeFromU32(info.lastMod) << ", ";
+        << ToSqlDateTimeFromU32(info.lastMod) << ", "
+        << ToSqlDateTimeFromU32(info.lastAdvert) << ", ";
 
     if (hasLocation)
     {
@@ -2983,4 +3000,141 @@ bool MeshDB::DeleteChannelByKeyHex(const std::string& keyHex)
         << " AND is_observed = 0";
 
     return Execute(sql2.str());
+}
+
+bool MeshDB::EnqueueResetPath(const std::string& publicKeyHex)
+{
+    std::lock_guard<std::mutex> lock(s_mutex);
+
+    if (!s_ready || s_conn == nullptr)
+    {
+        return false;
+    }
+
+    std::ostringstream oss;
+    oss
+        << "INSERT INTO companion_actions ("
+        << "    action_type,"
+        << "    public_key_hex,"
+        << "    status"
+        << ") VALUES ("
+        << "    'reset_path',"
+        << "    " << ToSqlNullableString(publicKeyHex) << ","
+        << "    " << static_cast<unsigned>(CompanionActionStatus::Queued)
+        << ")";
+
+    return mysql_query(s_conn, oss.str().c_str()) == 0;
+}
+
+std::optional<MeshDB::CompanionAction> MeshDB::FetchNextQueuedCompanionAction()
+{
+    std::lock_guard<std::mutex> lock(s_mutex);
+
+    if (!s_ready || s_conn == nullptr)
+    {
+        return std::nullopt;
+    }
+
+    std::ostringstream oss;
+    oss
+        << "SELECT id, action_type, IFNULL(public_key_hex, '') "
+        << "FROM companion_actions "
+        << "WHERE status = " << static_cast<unsigned>(CompanionActionStatus::Queued) << " "
+        << "ORDER BY created_at ASC, id ASC "
+        << "LIMIT 1";
+
+    if (mysql_query(s_conn, oss.str().c_str()) != 0)
+    {
+        return std::nullopt;
+    }
+
+    MYSQL_RES* result = mysql_store_result(s_conn);
+
+    if (result == nullptr)
+    {
+        return std::nullopt;
+    }
+
+    MYSQL_ROW row = mysql_fetch_row(result);
+
+    if (row == nullptr)
+    {
+        mysql_free_result(result);
+        return std::nullopt;
+    }
+
+    CompanionAction action {};
+    action.id = row[0] ? std::strtoull(row[0], nullptr, 10) : 0;
+    action.actionType = row[1] ? row[1] : "";
+    action.publicKeyHex = row[2] ? row[2] : "";
+
+    mysql_free_result(result);
+    return action;
+}
+
+bool MeshDB::MarkCompanionActionRunning(unsigned long long id)
+{
+    std::lock_guard<std::mutex> lock(s_mutex);
+
+    if (!s_ready || s_conn == nullptr)
+    {
+        return false;
+    }
+
+    std::ostringstream oss;
+    oss
+        << "UPDATE companion_actions "
+        << "SET status = " << static_cast<unsigned>(CompanionActionStatus::Running) << ", "
+        << "    error_text = NULL "
+        << "WHERE id = " << id << " "
+        << "  AND status = " << static_cast<unsigned>(CompanionActionStatus::Queued);
+
+    if (mysql_query(s_conn, oss.str().c_str()) != 0)
+    {
+        return false;
+    }
+
+    return mysql_affected_rows(s_conn) > 0;
+}
+
+bool MeshDB::MarkCompanionActionDone(unsigned long long id)
+{
+    std::lock_guard<std::mutex> lock(s_mutex);
+
+    if (!s_ready || s_conn == nullptr)
+    {
+        return false;
+    }
+
+    std::ostringstream oss;
+    oss
+        << "UPDATE companion_actions "
+        << "SET status = " << static_cast<unsigned>(CompanionActionStatus::Done) << ", "
+        << "    error_text = NULL, "
+        << "    processed_at = CURRENT_TIMESTAMP "
+        << "WHERE id = " << id;
+
+    return mysql_query(s_conn, oss.str().c_str()) == 0;
+}
+
+bool MeshDB::MarkCompanionActionFailed(
+    unsigned long long id,
+    const std::string& errorText)
+{
+    std::lock_guard<std::mutex> lock(s_mutex);
+
+    if (!s_ready || s_conn == nullptr)
+    {
+        return false;
+    }
+
+    std::ostringstream oss;
+    oss
+        << "UPDATE companion_actions "
+        << "SET status = " << static_cast<unsigned>(CompanionActionStatus::Failed) << ", "
+        << "    error_text = " << ToSqlNullableString(errorText) << ", "
+        << "    processed_at = CURRENT_TIMESTAMP "
+        << "WHERE id = " << id;
+
+    return mysql_query(s_conn, oss.str().c_str()) == 0;
 }

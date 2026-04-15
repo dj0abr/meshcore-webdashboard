@@ -122,6 +122,8 @@ public:
     // Contacts
     std::optional<std::vector<Peer>> listPeers(std::optional<uint32_t> since = std::nullopt);
 
+    bool resetPath(const std::array<uint8_t, 32>& publicKey);
+
     // Messaging
     struct TxQueued
     {

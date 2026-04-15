@@ -72,6 +72,10 @@ const el =
     setupCancelButton: document.getElementById("setupCancelButton"),
     setupModalError: document.getElementById("setupModalError"),
     pageTitle: document.getElementById("pageTitle"),
+    rightPanelTitle: document.getElementById("rightPanelTitle"),
+    rightPanelSubtitle: document.getElementById("rightPanelSubtitle"),
+    rightPanelActions: document.getElementById("rightPanelActions"),
+    resetPathButton: document.getElementById("resetPathButton"),
 };
 
 const state =
@@ -102,6 +106,9 @@ const state =
     discoverPending: false,
     discoverPendingJobId: null,
     rightTab: "messages",
+    rightPanelMode: "messages",
+    mapContextRow: null,
+    resetPathPending: false,
 };
 
 const icons =
@@ -145,6 +152,146 @@ function consoledebug()
     }
 
     console.debug(...arguments);
+}
+
+function showRepeaterInfo(row)
+{
+    stopCurrentChatRefresh();
+    resetChatState();
+    state.rightView = "info";
+    setRightPanelMode("messages", null);
+
+    setChatInputEnabled(false);
+    hideRightPanelViews();
+    hideChatPathMap();
+
+    const pos = getNodeLatLon(row);
+
+    const nodeIdText =
+        row.node_id !== null && row.node_id !== undefined
+            ? String(row.node_id)
+            : "-";
+
+    const prefix6Text =
+        String(row.prefix6_hex || "").trim() !== ""
+            ? String(row.prefix6_hex)
+            : "-";
+
+    const publicKeyText =
+        String(row.public_key_hex || "").trim() !== ""
+            ? String(row.public_key_hex)
+            : "-";
+
+    const lastAdvertText =
+        row.last_advert_at
+            ? formatDateTime(row.last_advert_at)
+            : "-";
+
+    const firstSeenText =
+        row.first_seen_at
+            ? formatDateTime(row.first_seen_at)
+            : "-";
+
+    const updatedAtText =
+        row.updated_at
+            ? formatDateTime(row.updated_at)
+            : "-";
+
+    const lastModText =
+        row.last_mod_at
+            ? formatDateTime(row.last_mod_at)
+            : "-";
+
+    const advertFlagsText =
+        row.advert_flags !== null && row.advert_flags !== undefined
+            ? String(row.advert_flags)
+            : "-";
+
+    const positionText = pos
+        ? `${pos.lat.toFixed(6)}, ${pos.lon.toFixed(6)}`
+        : "keine Positionsdaten verfügbar.";
+
+    if (el.mapEmpty)
+    {
+        el.mapEmpty.innerHTML = `
+            <div style="display:flex; flex-direction:column; gap:10px; width:100%; max-width:900px; justify-self:start; text-align:left;">
+                <div>
+                    📡 <strong>${escapeHtml(row.name || "-")}</strong>
+                </div>
+
+                <div style="display:grid; grid-template-columns:max-content 1fr; gap:8px 14px; align-items:start;">
+                    <strong>Typ</strong><span>${escapeHtml(row.advert_type_label || "REPEATER")}</span>
+                    <strong>Node-ID</strong><span>${escapeHtml(nodeIdText)}</span>
+                    <strong>Prefix6</strong><span>${escapeHtml(prefix6Text)}</span>
+                    <strong>Public Key</strong><span style="word-break:break-all;">${escapeHtml(publicKeyText)}</span>
+                    <strong>Letztes Advert</strong><span>${escapeHtml(lastAdvertText)}</span>
+                    <strong>Erstmals gesehen</strong><span>${escapeHtml(firstSeenText)}</span>
+                    <strong>Zuletzt aktualisiert</strong><span>${escapeHtml(updatedAtText)}</span>
+                    <strong>Last Mod</strong><span>${escapeHtml(lastModText)}</span>
+                    <strong>Advert Flags</strong><span>${escapeHtml(advertFlagsText)}</span>
+                    <strong>Position</strong><span>${escapeHtml(positionText)}</span>
+                </div>
+            </div>
+        `;
+
+        el.mapEmpty.style.display = "grid";
+        el.mapEmpty.style.justifyItems = "start";
+        el.mapEmpty.style.alignItems = "start";
+    }
+}
+
+function setRightPanelHeader(title, subtitle = "")
+{
+    if (el.rightPanelTitle)
+    {
+        el.rightPanelTitle.textContent = title;
+    }
+
+    if (el.rightPanelSubtitle)
+    {
+        el.rightPanelSubtitle.textContent = subtitle;
+    }
+}
+
+function updateResetPathButton()
+{
+    if (!el.resetPathButton)
+    {
+        return;
+    }
+
+    const row = state.mapContextRow;
+    const publicKeyHex = String(row?.public_key_hex || "").trim();
+    const canReset = /^[0-9A-Fa-f]{64}$/.test(publicKeyHex);
+
+    el.resetPathButton.style.display =
+        state.rightPanelMode === "map" && canReset
+            ? ""
+            : "none";
+
+    el.resetPathButton.disabled = !canReset || state.resetPathPending;
+}
+
+function setRightPanelMode(mode, row = null)
+{
+    state.rightPanelMode = mode;
+    state.mapContextRow = mode === "map" ? row : null;
+
+    if (mode === "map")
+    {
+        const rowName = String(row?.name || "").trim();
+
+        setRightPanelHeader(
+            tr("panel.map", "Map"),
+            rowName !== "" ? rowName : ""
+        );
+    }
+    else
+    {
+        setRightPanelHeader(tr("panel.messages", "Messages"), "");
+    }
+
+    updateResetPathButton();
 }
 
 function ensureChatPathMap()
@@ -856,6 +1003,11 @@ function isChannelRow(row)
 function isChatLikeNode(row)
 {
     return isChatNode(row) || isRoomNode(row) || isChannelRow(row);
+}
+
+function isRepeaterNode(row)
+{
+    return String(row?.advert_type_label || "").toUpperCase() === "REPEATER";
 }
 
 function getChatKindLabel(row)
@@ -1614,6 +1766,7 @@ function showEmptyRightPanel()
     stopCurrentChatRefresh();
     resetChatState();
     state.rightView = "empty";
+    setRightPanelMode("messages", null);
 
     setChatInputEnabled(false);
     hideRightPanelViews();
@@ -1635,6 +1788,8 @@ function showInfoForRow(row)
 {
     stopCurrentChatRefresh();
     resetChatState();
+    state.rightView = "map";
+    setRightPanelMode("map", row);
 
     setChatInputEnabled(false);
     hideRightPanelViews();
@@ -1652,6 +1807,7 @@ function showInfoForRow(row)
 function showMapForRow(row)
 {
     state.rightView = "map";
+    setRightPanelMode("map", row);
     resetChatState();
     setChatInputEnabled(false);
 
@@ -1659,6 +1815,7 @@ function showMapForRow(row)
 
     if (!pos || !el.mapView)
     {
+        showInfoForRow(row);
         return;
     }
 
@@ -1677,6 +1834,7 @@ function showMapForRow(row)
 
     const marker = L.marker([pos.lat, pos.lon], { icon: getMarkerIcon(row) }).addTo(state.leafletMarkers);
     marker.bindPopup(escapeHtml(row.name || "-"));
+
     if (state.autoZoom)
     {
         map.setView([pos.lat, pos.lon], 13);
@@ -1693,6 +1851,7 @@ function showAllNodesMap()
     stopCurrentChatRefresh();
     resetChatState();
     state.rightView = "allmap";
+    setRightPanelMode("map", null);
     setChatInputEnabled(false);
 
     if (!el.mapView)
@@ -2842,6 +3001,7 @@ function startCurrentChatRefresh()
 async function showChatForRow(row)
 {
     state.rightView = "chat";
+    setRightPanelMode("messages", null);
     state.chatRow = row;
     state.chatLastMessageId = 0;
     state.chatMessages = [];
@@ -3559,6 +3719,10 @@ table = new Tabulator("#nodesTable",
                 {
                     showChatForRow(row);
                 }
+                else if (isRepeaterNode(row))
+                {
+                    showRepeaterInfo(row);
+                }
                 else
                 {
                     showInfoForRow(row);
@@ -3570,14 +3734,11 @@ table = new Tabulator("#nodesTable",
 
                 const row = cell.getRow().getData();
 
+                state.autoZoom = true;
+
                 if (hasLocation(row))
                 {
-                    state.autoZoom = true;
                     showMapForRow(row);
-                }
-                else if (isChatLikeNode(row))
-                {
-                    showChatForRow(row);
                 }
                 else
                 {
@@ -4136,6 +4297,98 @@ async function applyCompanionSetup()
         })
     });
 }
+
+async function resetNodePath(publicKeyHex)
+{
+    return await fetchJson("reset_node_path.php",
+    {
+        method: "POST",
+        headers:
+        {
+            "Content-Type": "application/json",
+            "Accept": "application/json"
+        },
+        body: JSON.stringify(
+        {
+            public_key_hex: String(publicKeyHex || "")
+        })
+    });
+}
+
+async function handleResetPathButtonClick()
+{
+    const row = state.mapContextRow;
+
+    if (!row)
+    {
+        return;
+    }
+
+    const publicKeyHex = String(row.public_key_hex || "").trim();
+    const nodeName = String(row.name || "").trim() || "-";
+
+    if (!/^[0-9A-Fa-f]{64}$/.test(publicKeyHex))
+    {
+        window.alert(
+            tr(
+                "map.reset_path.invalid_key",
+                "Für diesen Eintrag ist kein gültiger Public Key vorhanden."
+            )
+        );
+        return;
+    }
+
+    const confirmed = window.confirm(
+        tr(
+            "map.reset_path.confirm",
+            "Gespeicherten Pfad für \"{name}\" löschen?",
+            {
+                name: nodeName
+            }
+        )
+    );
+
+    if (!confirmed)
+    {
+        return;
+    }
+
+    state.resetPathPending = true;
+    updateResetPathButton();
+
+    try
+    {
+        await resetNodePath(publicKeyHex);
+        //window.alert(`Pfad für "${nodeName}" wurde zum Löschen vorgemerkt.`);
+    }
+    catch (error)
+    {
+        window.alert(
+            tr(
+                "map.reset_path.error",
+                "Fehler beim Löschen des Pfads: {message}",
+                {
+                    message: error.message || tr("error.unknown", "Unbekannter Fehler")
+                }
+            )
+        );
+    }
+    finally
+    {
+        state.resetPathPending = false;
+        updateResetPathButton();
+    }
+}
+
+if (el.resetPathButton)
+{
+    el.resetPathButton.textContent = tr("map.reset_path", "Pfad löschen");
+}
+
+el.resetPathButton?.addEventListener("click", function()
+{
+    handleResetPathButtonClick();
+});
 
 if (el.setupButton)
 {

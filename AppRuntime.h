@@ -43,6 +43,9 @@ public:
     bool CreatePublicChannel(const std::string& name);
     bool CreatePrivateChannel(const std::string& name, const std::string& secretHex);
 
+    void ProcessCompanionActions();
+    bool ProcessSingleCompanionAction(const MeshDB::CompanionAction& action);
+
 private:
     bool ShouldRunContactSync();
     void SyncContacts();

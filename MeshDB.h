@@ -124,6 +124,21 @@ public:
         uint8_t sourceCode = 0;
     };
 
+    enum class CompanionActionStatus : uint8_t
+    {
+        Queued = 0,
+        Running = 1,
+        Failed = 2,
+        Done = 3
+    };
+
+    struct CompanionAction
+    {
+        unsigned long long id = 0;
+        std::string actionType;
+        std::string publicKeyHex;
+    };
+
     static bool CreateDiscoverJob(
         uint8_t typeFilter,
         const std::string& requestedBy,
@@ -254,6 +269,14 @@ public:
         const std::string& name,
         int32_t advLatE6,
         int32_t advLonE6);
+
+    static bool EnqueueResetPath(const std::string& publicKeyHex);
+    static std::optional<CompanionAction> FetchNextQueuedCompanionAction();
+    static bool MarkCompanionActionRunning(unsigned long long id);
+    static bool MarkCompanionActionDone(unsigned long long id);
+    static bool MarkCompanionActionFailed(
+        unsigned long long id,
+        const std::string& errorText);
 
 private:
 
