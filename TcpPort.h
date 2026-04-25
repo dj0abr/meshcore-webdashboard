@@ -6,17 +6,16 @@
 #include <cstdint>
 #include <string>
 
-class SerialPort : public IByteStream
+class TcpPort : public IByteStream
 {
 public:
-    SerialPort();
-    ~SerialPort() override;
+    TcpPort();
+    ~TcpPort() override;
 
-    bool open(const std::string &device, int baud = 115200);
+    bool open(const std::string &host, uint16_t port);
 
     void close() override;
     bool isOpen() const override;
-    int fd() const;
 
     bool writeAll(const uint8_t *data, size_t len) override;
     bool readExact(uint8_t *data, size_t len, int timeoutMs) override;
@@ -24,6 +23,4 @@ public:
 
 private:
     int m_fd;
-
-    bool configure(int baud);
 };

@@ -4,6 +4,44 @@
 #include "MessageCorrelation.h"
 
 #include <iostream>
+#include <cmath>
+#include <ctime>
+#include <algorithm>
+#include <cctype>
+
+namespace
+{
+    std::string Normalize(std::string s)
+    {
+        std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c)
+        {
+            return static_cast<char>(std::tolower(c));
+        });
+
+        // alles was kein Buchstabe/Zahl ist → Leerzeichen
+        std::replace_if(s.begin(), s.end(), [](unsigned char c)
+        {
+            return !std::isalnum(c);
+        }, ' ');
+
+        return s;
+    }
+
+    bool ContainsWord(const std::string& text, const std::string& word)
+    {
+        const std::string norm = Normalize(text);
+        const std::string w = word;
+
+        return norm.find(w) != std::string::npos;
+    }
+
+    bool IsTestCommand(const std::string& text)
+    {
+        return ContainsWord(text, "ping")
+            || ContainsWord(text, "test")
+            || ContainsWord(text, "path");
+    }
+}
 
 MessageRouter::MessageRouter(MeshCoreClient& client)
     : m_client(client)
@@ -50,6 +88,12 @@ void MessageRouter::HandleMessage(const MeshCoreClient::RxMessage& msg, const st
     info.txtType = msg.txtType;
     info.channelIdx = msg.channelIdx;
     info.text = msg.text;
+
+    // Autoresponder in channel #test
+    if (msg.isChannel && fromName == "#test")
+    {
+        HandleTestChannelMessage(msg);
+    }
 
     if (msg.isChannel)
     {
@@ -112,4 +156,47 @@ void MessageRouter::HandleMessage(const MeshCoreClient::RxMessage& msg, const st
     std::cout << "\n";
 
     DataConnector::Emit(info);
+}
+
+static std::string ExtractSenderName(const std::string& text)
+{
+    const auto pos = text.find(':');
+
+    if (pos == std::string::npos)
+    {
+        return {};
+    }
+
+    return text.substr(0, pos);
+}
+
+void MessageRouter::HandleTestChannelMessage(const MeshCoreClient::RxMessage& msg)
+{
+    std::cout << "[#test] " << msg.text << "\n";
+
+    if (!IsTestCommand(msg.text)) return;
+
+    // keine Ping Flood zulassen
+    static std::time_t lastReply = 0;
+    const std::time_t now = std::time(nullptr);
+    if ((now - lastReply) < 10)
+    {
+        std::cout << "[#test] auto reply suppressed by cooldown\n";
+        return;
+    }
+    lastReply = now;
+
+    const std::string senderName = ExtractSenderName(msg.text);
+
+    std::string reply =                 "";
+    if (!senderName.empty()) reply +=   "@[" + senderName + "] 🏓 Pong";
+    reply +=                            " | Hops: " + std::to_string(static_cast<unsigned>(msg.pathLen));
+
+    if (!MeshDB::EnqueueChannelTxFromBot(msg.channelIdx, reply))
+    {
+        std::cout << "[#test] enqueue auto reply failed\n";
+        return;
+    }
+
+    std::cout << "[#test] auto reply queued: " << reply << "\n";
 }

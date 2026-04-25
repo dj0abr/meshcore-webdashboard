@@ -490,7 +490,7 @@ bool MeshDB::EnsureSchema()
             "    peer_node_id INT UNSIGNED DEFAULT NULL,"
             "    room_node_id INT UNSIGNED DEFAULT NULL,"
             "    text TEXT NOT NULL,"
-            "    status TINYINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '0=received,1=queued,2=sent,3=failed',"
+            "    status TINYINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '0=pending (waiting to be sent),1=confirmed (successfully sent),2=failed (error)',"
             "    tx_outbox_id BIGINT UNSIGNED DEFAULT NULL,"
             "    sender_prefix6_hex CHAR(12) DEFAULT NULL,"
             "    sender_timestamp INT UNSIGNED DEFAULT NULL,"
@@ -612,6 +612,13 @@ bool MeshDB::EnsureSchema()
         "    KEY idx_companion_actions_action_type (action_type),"
         "    KEY idx_companion_actions_public_key_hex (public_key_hex)"
         ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4";
+    const char* sqlCompanionRadioStatus =
+        "CREATE TABLE IF NOT EXISTS companion_radio_status ("
+        "    id TINYINT UNSIGNED NOT NULL,"
+        "    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,"
+        "    json_text JSON NOT NULL,"
+        "    PRIMARY KEY (id)"
+        ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4";
     return Execute(sqlNodes)
         && Execute(sqlTxOutbox)
         && Execute(sqlRoomCredentials)
@@ -619,6 +626,7 @@ bool MeshDB::EnsureSchema()
         && Execute(sqlChatMessages)
         && Execute(sqlRxLogMessages)
         && Execute(sqlCompanionConfig)
+        && Execute(sqlCompanionRadioStatus)
         && Execute(sqlDiscoverJobs)
         && Execute(sqlCompanionActions)
         && Execute(sqlDiscoverResults);
@@ -727,7 +735,7 @@ bool MeshDB::UpsertNodeFromAdvert(const DataConnector::AdvertInfo& info)
         << ToSqlString(publicKeyHex) << ", "
         << ToSqlString(prefix6Hex) << ", "
         << ToSqlDateTime(lastAdvert) << ", "
-        << ToSqlDateTime(lastAdvert) << ", ";
+        << "COALESCE(" << ToSqlDateTime(lastAdvert) << ", CURRENT_TIMESTAMP), ";
 
     if (hasLocation)
     {
@@ -806,7 +814,7 @@ bool MeshDB::UpsertNodeFromPushNewAdvert(const DataConnector::PushNewAdvertInfo&
         << ToSqlString(prefix6Hex) << ", "
         << ToSqlDateTimeFromU32(info.lastAdvert) << ", "
         << ToSqlDateTimeFromU32(info.lastMod) << ", "
-        << ToSqlDateTimeFromU32(info.lastAdvert) << ", ";
+        << "COALESCE(" << ToSqlDateTimeFromU32(info.lastAdvert) << ", CURRENT_TIMESTAMP), ";
 
     if (hasLocation)
     {
@@ -825,10 +833,10 @@ bool MeshDB::UpsertNodeFromPushNewAdvert(const DataConnector::PushNewAdvertInfo&
         << "name=VALUES(name), "
         << "public_key_hex=VALUES(public_key_hex), "
         << "prefix6_hex=VALUES(prefix6_hex), "
-        << "last_advert_at=VALUES(last_advert_at), "
+        << "last_advert_at=COALESCE(VALUES(last_advert_at), last_advert_at), "
         << "last_mod_at=VALUES(last_mod_at), "
-        << "adv_lat_e6=VALUES(adv_lat_e6), "
-        << "adv_lon_e6=VALUES(adv_lon_e6), "
+        << "adv_lat_e6=COALESCE(VALUES(adv_lat_e6), adv_lat_e6), "
+        << "adv_lon_e6=COALESCE(VALUES(adv_lon_e6), adv_lon_e6), "
         << "updated_at=CURRENT_TIMESTAMP";
 
     return Execute(oss.str());
@@ -1384,7 +1392,21 @@ bool MeshDB::MarkTxDone(unsigned long long id)
         << "last_error = NULL "
         << "WHERE id = " << id;
 
-    return Execute(oss.str());
+    if (!Execute(oss.str()))
+    {
+        return false;
+    }
+
+    std::ostringstream chatUpd;
+
+    chatUpd
+        << "UPDATE chat_messages SET "
+        << "status = 1 "
+        << "WHERE tx_outbox_id = " << id;
+
+    Execute(chatUpd.str());
+
+    return true;
 }
 
 bool MeshDB::MarkTxWaitingAck(
@@ -3137,4 +3159,112 @@ bool MeshDB::MarkCompanionActionFailed(
         << "WHERE id = " << id;
 
     return mysql_query(s_conn, oss.str().c_str()) == 0;
+}
+
+bool MeshDB::ResetTxRetryCount(unsigned long long id)
+{
+    std::lock_guard<std::mutex> lock(s_mutex);
+
+    if (!s_ready)
+    {
+        return false;
+    }
+
+    std::ostringstream oss;
+
+    oss
+        << "UPDATE tx_outbox SET "
+        << "retry_count = 0 "
+        << "WHERE id = " << id;
+
+    return Execute(oss.str());
+}
+
+bool MeshDB::StoreCompanionRadioStatusJson(const std::string& jsonText)
+{
+    std::lock_guard<std::mutex> lock(s_mutex);
+
+    if (!s_ready || s_conn == nullptr)
+    {
+        return false;
+    }
+
+    const std::string jsonEsc = Escape(jsonText);
+
+    std::ostringstream oss;
+    oss << "INSERT INTO companion_radio_status (id, json_text) "
+        << "VALUES (1, '" << jsonEsc << "') "
+        << "ON DUPLICATE KEY UPDATE "
+        << "json_text = VALUES(json_text), "
+        << "updated_at = CURRENT_TIMESTAMP";
+
+    return Execute(oss.str());
+}
+
+bool MeshDB::EnqueueChannelTxFromBot(
+    uint8_t channelIdx,
+    const std::string& messageText)
+{
+    std::lock_guard<std::mutex> lock(s_mutex);
+
+    if (!s_ready || (s_conn == nullptr))
+    {
+        return false;
+    }
+
+    const auto channel = FindChannelByIdxUnlockedImpl(channelIdx);
+
+    if (!channel.has_value())
+    {
+        return false;
+    }
+
+    std::ostringstream txSql;
+
+    txSql
+        << "INSERT INTO tx_outbox ("
+        << "tx_kind, channel_name, channel_idx, channel_key_hex, "
+        << "message_text, status, retry_count, max_retries, next_attempt_epoch"
+        << ") VALUES ("
+        << unsigned(OutgoingTx::Kind::Channel) << ", "
+        << ToSqlString(channel->name) << ", "
+        << unsigned(channel->channelIdx) << ", "
+        << ToSqlString(channel->keyHex) << ", "
+        << ToSqlString(messageText) << ", "
+        << unsigned(TxStatus::Queued) << ", "
+        << "0, "
+        << "3, "
+        << "UNIX_TIMESTAMP()"
+        << ")";
+
+    if (!Execute(txSql.str()))
+    {
+        return false;
+    }
+
+    const unsigned long long txId = mysql_insert_id(s_conn);
+
+    std::ostringstream chatSql;
+
+    chatSql
+        << "INSERT INTO chat_messages ("
+        << "timestamp_epoch, direction, chat_kind, name, room_sender_name, "
+        << "channel_idx, channel_key_hex, peer_node_id, room_node_id, "
+        << "text, status, tx_outbox_id"
+        << ") VALUES ("
+        << "UNIX_TIMESTAMP(), "
+        << "1, "
+        << "2, "
+        << ToSqlString(channel->name) << ", "
+        << "NULL, "
+        << unsigned(channel->channelIdx) << ", "
+        << ToSqlString(channel->keyHex) << ", "
+        << "NULL, "
+        << "NULL, "
+        << ToSqlString(messageText) << ", "
+        << "1, "
+        << txId
+        << ")";
+
+    return Execute(chatSql.str());
 }

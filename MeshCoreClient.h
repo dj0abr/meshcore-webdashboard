@@ -84,6 +84,17 @@ public:
         uint8_t sourceCode = 0;
     };
 
+    struct RadioStats
+    {
+        int noiseFloor = 0;
+        int lastRssi = 0;
+        float lastSnr = 0.0f;
+        uint32_t txAirSecs = 0;
+        uint32_t rxAirSecs = 0;
+    };
+
+    std::optional<RadioStats> getRadioStats();
+
     std::optional<std::vector<DiscoverResult>> discoverRepeaters(
         int ackTimeoutMs = 3000,
         int settleMs = 1500,

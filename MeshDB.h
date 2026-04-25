@@ -171,6 +171,7 @@ public:
     static bool StorePushPathUpdated(const DataConnector::PushPathUpdatedInfo& info, const std::string& summary);
     static bool StorePushNewAdvert(const DataConnector::PushNewAdvertInfo& info, const std::string& summary);
     static bool StorePushUnknown(const DataConnector::PushUnknownInfo& info, const std::string& summary);
+    static bool StoreCompanionRadioStatusJson(const std::string& jsonText);
 
     static std::optional<OutgoingTx> FetchNextQueuedTx();
     static std::vector<OutgoingTx> FetchTimedOutWaitingTx(unsigned int limit);
@@ -197,6 +198,8 @@ public:
         unsigned long long id,
         const std::string& errorText,
         uint32_t nextAttemptEpoch);
+
+    static bool ResetTxRetryCount(unsigned long long id);
 
     static bool MarkTxFailed(
         unsigned long long id,
@@ -277,6 +280,10 @@ public:
     static bool MarkCompanionActionFailed(
         unsigned long long id,
         const std::string& errorText);
+
+    static bool EnqueueChannelTxFromBot(
+        uint8_t channelIdx,
+        const std::string& messageText);
 
 private:
 

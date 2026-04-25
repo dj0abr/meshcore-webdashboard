@@ -134,3 +134,9 @@ bool SerialPort::readExact(uint8_t *data, size_t len, int timeoutMs)
 
     return true;
 }
+
+bool SerialPort::readByte(uint8_t &byte, int timeoutMs)
+{
+    return readExact(&byte, 1, timeoutMs);
+}
+

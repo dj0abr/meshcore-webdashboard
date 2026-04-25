@@ -11,6 +11,10 @@
 
 #include "SerialPort.h"
 #include "MeshCoreFramer.h"
+#include "IByteStream.h"
+#include "TcpPort.h"
+
+#include <memory>
 
 class MeshCoreLink
 {
@@ -43,9 +47,6 @@ public:
 private:
     std::atomic<bool> m_running;
 
-    SerialPort m_port;
-    std::optional<MeshCoreFramer> m_framer;
-
     std::thread m_rxThread;
 
     // callbacks
@@ -58,6 +59,9 @@ private:
     bool m_waiting;
     std::vector<uint8_t> m_wantedCodes;
     std::vector<uint8_t> m_lastResp;
+
+    std::unique_ptr<IByteStream> m_stream;
+    std::optional<MeshCoreFramer> m_framer;
 
     void rxLoop();
 };

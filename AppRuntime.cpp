@@ -11,6 +11,7 @@
 #include <openssl/sha.h>
 
 static constexpr unsigned DISCOVER_COOLDOWN_SECONDS = 5;
+static constexpr unsigned RADIO_STATUS_POLL_SECONDS = 10;
 
 static int HexNibble(char c)
 {
@@ -143,6 +144,7 @@ AppRuntime::AppRuntime(MeshCoreClient& client)
     , m_syncContactsRequested(false)
     , m_syncContactsAt()
     , m_nextChannelSyncPollAt(std::chrono::steady_clock::now())
+    , m_nextRadioStatusPollAt(std::chrono::steady_clock::now()) 
 {
 }
 
@@ -203,6 +205,7 @@ void AppRuntime::Tick()
         m_nextChannelSyncPollAt = std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
     }
     
+    PollRadioStatus();
     ProcessCompanionActions();
     ProcessOutgoingQueue();
     ProcessDiscoverQueue();
@@ -460,8 +463,25 @@ void AppRuntime::HandleRoomLoginFailure(
 
     const uint8_t nextRetryCount = static_cast<uint8_t>(tx.retryCount + 1);
 
-    if (nextRetryCount >= tx.maxRetries)
+    std::cout << "[ROOM] login retry scheduled"
+              << " roomNodeId=" << roomNodeId
+              << " txId=" << tx.id
+              << " txRetryCount=" << static_cast<unsigned>(tx.retryCount)
+              << " nextRetryCount=" << static_cast<unsigned>(nextRetryCount)
+              << " maxRetries=" << static_cast<unsigned>(tx.maxRetries)
+              << " delaySec=" << retryDelaySec
+              << " reason='" << reason << "'"
+              << "\n";
+
+    if (nextRetryCount > tx.maxRetries)
     {
+        std::cout << "[ROOM] login retries exhausted"
+                  << " roomNodeId=" << roomNodeId
+                  << " txId=" << tx.id
+                  << " finalRetryCount=" << static_cast<unsigned>(tx.retryCount)
+                  << " maxRetries=" << static_cast<unsigned>(tx.maxRetries)
+                  << "\n";
+
         MeshDB::MarkTxFailed(tx.id, reason);
         return;
     }
@@ -514,7 +534,11 @@ bool AppRuntime::EnsureRoomReady(const MeshDB::OutgoingTx& tx, uint32_t roomNode
                 return false;
             }
 
-            if (!m_roomAuth.BeginLogin(roomNodeId))
+            if (!m_roomAuth.BeginLogin(
+                    roomNodeId,
+                    tx.id,
+                    static_cast<uint32_t>(std::time(nullptr)),
+                    15U))
             {
                 MeshDB::MarkTxDeferred(
                     tx.id,
@@ -522,13 +546,28 @@ bool AppRuntime::EnsureRoomReady(const MeshDB::OutgoingTx& tx, uint32_t roomNode
                     static_cast<uint32_t>(std::time(nullptr)) + 5U);
                 return false;
             }
+
             return StartRoomLogin(tx, roomNodeId);
         }
 
         case RoomAuthManager::State::LoginPending:
         {
             printf("EnsureRoomReady: room login pending\n");
-            HandleRoomLoginFailure(tx, roomNodeId, "room login timeout", 5U);
+
+            const uint32_t nowSec = static_cast<uint32_t>(std::time(nullptr));
+
+            if (m_roomAuth.IsLoginTimedOut(roomNodeId, nowSec))
+            {
+                printf("EnsureRoomReady: room login timed out\n");
+                HandleRoomLoginFailure(tx, roomNodeId, "room login timeout", 5U);
+                return false;
+            }
+
+            MeshDB::MarkTxDeferred(
+                tx.id,
+                "room login pending",
+                nowSec + 1U);
+
             return false;
         }
 
@@ -566,6 +605,15 @@ bool AppRuntime::ProcessRoomTx(const MeshDB::OutgoingTx& tx)
     }
 
     const uint32_t senderTimestamp = DetermineSenderTimestamp(tx);
+
+    std::cout << "[ROOM] sendRoomMessageEx()"
+            << " roomNodeId=" << roomNodeId
+            << " txId=" << tx.id
+            << " attempt=" << static_cast<unsigned>(tx.retryCount)
+            << " maxRetries=" << static_cast<unsigned>(tx.maxRetries)
+            << " senderTimestamp=" << senderTimestamp
+            << " textLen=" << tx.messageText.size()
+            << "\n";
 
     const auto result = m_client.sendRoomMessageEx(
         roomNodeId,
@@ -650,7 +698,7 @@ void AppRuntime::HandleSendFailure(const MeshDB::OutgoingTx& tx, const char* rea
 {
     const uint8_t nextRetryCount = static_cast<uint8_t>(tx.retryCount + 1);
 
-    if (nextRetryCount >= tx.maxRetries)
+    if (nextRetryCount > tx.maxRetries)
     {
         MeshDB::MarkTxFailed(tx.id, reason);
         return;
@@ -677,7 +725,7 @@ void AppRuntime::ProcessAckTimeouts()
 
 void AppRuntime::HandleAckTimeout(const MeshDB::OutgoingTx& tx)
 {
-    if (tx.retryCount >= tx.maxRetries)
+    if (tx.retryCount > tx.maxRetries)
     {
         MeshDB::MarkTxFailed(
             tx.id,
@@ -696,9 +744,9 @@ void AppRuntime::HandleAckTimeout(const MeshDB::OutgoingTx& tx)
 
 void AppRuntime::NotifyRoomLoginSuccess(const std::array<uint8_t, 6>& prefix6)
 {
-    const auto roomNodeIdOpt = m_roomAuth.ResolvePendingLoginSuccess();
+    const auto resolvedOpt = m_roomAuth.ResolvePendingLoginSuccess();
 
-    if (!roomNodeIdOpt.has_value())
+    if (!resolvedOpt.has_value())
     {
         std::cout << "[ROOM] LOGIN_SUCCESS without pending room"
                   << " prefix="
@@ -707,25 +755,31 @@ void AppRuntime::NotifyRoomLoginSuccess(const std::array<uint8_t, 6>& prefix6)
         return;
     }
 
+    MeshDB::ResetTxRetryCount(resolvedOpt->txId);
+
     std::cout << "[ROOM] login success for room node "
-              << *roomNodeIdOpt
+              << resolvedOpt->roomNodeId
               << " prefix="
               << DataConnector::hexBytes(prefix6.data(), prefix6.size())
+              << " txId=" << resolvedOpt->txId
+              << " txRetryCountReset=1"
               << "\n";
 }
 
 void AppRuntime::NotifyRoomLoginFail()
 {
-    const auto roomNodeIdOpt = m_roomAuth.ResolvePendingLoginFail();
+    const auto resolvedOpt = m_roomAuth.ResolvePendingLoginFail();
 
-    if (!roomNodeIdOpt.has_value())
+    if (!resolvedOpt.has_value())
     {
         std::cout << "[ROOM] LOGIN_FAIL without pending room\n";
         return;
     }
 
     std::cout << "[ROOM] login failed for room node "
-              << *roomNodeIdOpt << "\n";
+              << resolvedOpt->roomNodeId
+              << " txId=" << resolvedOpt->txId
+              << "\n";
 }
 
 void AppRuntime::SetRoomPassword(uint32_t roomNodeId, const std::string& password)
@@ -747,11 +801,11 @@ void AppRuntime::RequestRoomPassword(const MeshDB::OutgoingTx& tx, uint32_t room
 bool AppRuntime::StartRoomLogin(const MeshDB::OutgoingTx& tx, uint32_t roomNodeId)
 {
     std::cout << "[ROOM] StartRoomLogin roomNodeId="
-          << roomNodeId
-          << " roomName='"
-          << tx.roomName
-          << "'"
-          << "\n";
+              << roomNodeId
+              << " roomName='"
+              << tx.roomName
+              << "'"
+              << "\n";
 
     const auto passwordOpt = m_roomAuth.GetPassword(roomNodeId);
 
@@ -765,9 +819,9 @@ bool AppRuntime::StartRoomLogin(const MeshDB::OutgoingTx& tx, uint32_t roomNodeI
     }
 
     std::cout << "[ROOM] calling loginToRoomEx()"
-          << " roomNodeId=" << roomNodeId
-          << " passwordLen=" << passwordOpt->size()
-          << "\n";
+              << " roomNodeId=" << roomNodeId
+              << " passwordLen=" << passwordOpt->size()
+              << "\n";
 
     const auto result = m_client.loginToRoomEx(roomNodeId, *passwordOpt);
 
@@ -778,8 +832,13 @@ bool AppRuntime::StartRoomLogin(const MeshDB::OutgoingTx& tx, uint32_t roomNodeI
     else
     {
         std::cout << "[ROOM] loginToRoomEx() queued ack="
-                << *result
-                << "\n";
+                  << *result
+                  << "\n";
+
+        m_roomAuth.RefreshLoginDeadline(
+            roomNodeId,
+            static_cast<uint32_t>(std::time(nullptr)),
+            15U);
     }
 
     if (!result.has_value())
@@ -1463,3 +1522,36 @@ bool AppRuntime::ProcessSingleCompanionAction(const MeshDB::CompanionAction& act
     return false;
 }
 
+void AppRuntime::PollRadioStatus()
+{
+    const auto now = std::chrono::steady_clock::now();
+
+    if (now < m_nextRadioStatusPollAt)
+    {
+        return;
+    }
+
+    m_nextRadioStatusPollAt = now + std::chrono::seconds(RADIO_STATUS_POLL_SECONDS);
+
+    auto stats = m_client.getRadioStats();
+
+    if (!stats.has_value())
+    {
+        std::cerr << "[radio_status] getRadioStats() failed\n";
+        return;
+    }
+
+    std::ostringstream oss;
+    oss << "{"
+        << "\"noise_floor\":" << stats->noiseFloor << ","
+        << "\"last_rssi\":" << stats->lastRssi << ","
+        << "\"last_snr\":" << std::fixed << std::setprecision(1) << stats->lastSnr << ","
+        << "\"tx_air_secs\":" << stats->txAirSecs << ","
+        << "\"rx_air_secs\":" << stats->rxAirSecs
+        << "}";
+
+    if (!MeshDB::StoreCompanionRadioStatusJson(oss.str()))
+    {
+        std::cerr << "[radio_status] database update failed\n";
+    }
+}

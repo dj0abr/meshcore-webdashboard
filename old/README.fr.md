@@ -189,41 +189,6 @@ L'opération peut être **répétée plusieurs fois**.
 
 ------------------------------------------------------------------------
 
-## Connexion TCP (MeshCore Companion)
-
-En plus de la connexion USB classique, le backend peut également se connecter à un MeshCore Companion via TCP.
-
-### Prérequis
-
-Le Companion doit être flashé avec une image spéciale :
-https://www.weyhmueller.org/webtools/esp32_ssid_patcher.html
-
-### Flasher le Companion
-
-1. Connecter le Companion  
-2. Ouvrir le site web  
-3. Sélectionner et flasher le firmware  
-4. Redémarrer l’appareil  
-
-### Trouver l’adresse IP
-
-Après un redémarrage, l’adresse IP est affichée sur l’écran du Companion.  
-Si le Companion n’a pas d’écran, consultez votre routeur (liste DHCP).
-
-### Connexion
-
-```bash
-./meshcore_api tcp://<IP>:5000
-```
-
-Example:
-
-```bash
-./meshcore_api tcp://192.168.10.170:5000
-```
-
-------------------------------------------------------------------------
-
 ## License
 
 This project is licensed under the MIT License.

@@ -1138,6 +1138,67 @@
             box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.2);
         }
 
+        .noise-floor-meter
+        {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            width: 220px;
+            margin-left: auto;
+            margin-top: 6px;
+            color: var(--muted);
+            font-size: 11px;
+            line-height: 1;
+        }
+
+        .noise-floor-track
+        {
+            position: relative;
+            width: 140px;
+            min-width: 140px;
+            height: 7px;
+            border: 1px solid rgba(255, 255, 255, 0.16);
+            border-radius: 999px;
+            background: transparent;
+            overflow: hidden;
+        }
+
+        .noise-floor-fill
+        {
+            position: absolute;
+            left: 0;
+            top: 0;
+            height: 100%;
+            width: 0%;
+            border-radius: 999px;
+            background: #16a34a;
+            transition:
+                width 0.25s ease,
+                background-color 0.25s ease;
+        }
+
+        .noise-floor-fill.green
+        {
+            background: #16a34a;
+        }
+
+        .noise-floor-fill.yellow
+        {
+            background: #eab308;
+        }
+
+        .noise-floor-fill.red
+        {
+            background: #dc2626;
+        }
+
+        .noise-floor-text
+        {
+            min-width: 64px;
+            text-align: right;
+            white-space: nowrap;
+        }
+
         .chat-message-header
         {
             display: flex;
@@ -1340,6 +1401,13 @@
 
             <button id="discoverButton" type="button" data-i18n-title="discover.title">🔎</button>
             <button id="settingsButton" type="button" data-i18n-title="setup.title">⚙</button>
+        </div>
+
+        <div id="noiseFloorMeter" class="noise-floor-meter" title="Noise floor">
+            <div class="noise-floor-track" aria-hidden="true">
+                <div id="noiseFloorFill" class="noise-floor-fill"></div>
+            </div>
+            <div id="noiseFloorText" class="noise-floor-text">NF: --</div>
         </div>
     </header>
 

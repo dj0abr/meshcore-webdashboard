@@ -114,8 +114,7 @@ try
     {
         $updateSql = "
             UPDATE chat_messages
-            SET status = 1,
-                updated_at = CURRENT_TIMESTAMP
+            SET status = 1
             WHERE tx_outbox_id = ?
         ";
 
@@ -177,8 +176,7 @@ try
     {
         $updateSql = "
             UPDATE chat_messages
-            SET status = 2,
-                updated_at = CURRENT_TIMESTAMP
+            SET status = 2
             WHERE tx_outbox_id = ?
         ";
 
@@ -214,7 +212,6 @@ try
         );
         exit;
     }
-
     $db->close();
 
     echo json_encode(

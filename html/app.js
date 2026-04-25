@@ -76,6 +76,9 @@ const el =
     rightPanelSubtitle: document.getElementById("rightPanelSubtitle"),
     rightPanelActions: document.getElementById("rightPanelActions"),
     resetPathButton: document.getElementById("resetPathButton"),
+    noiseFloorMeter: document.getElementById("noiseFloorMeter"),
+    noiseFloorFill: document.getElementById("noiseFloorFill"),
+    noiseFloorText: document.getElementById("noiseFloorText"),
 };
 
 const state =
@@ -109,6 +112,7 @@ const state =
     rightPanelMode: "messages",
     mapContextRow: null,
     resetPathPending: false,
+    noiseFloorRefreshTimer: null,
 };
 
 const icons =
@@ -1349,6 +1353,102 @@ async function fetchJson(url, options = {})
     return data;
 }
 
+async function loadCompanionRadioStatus()
+{
+    return await fetchJson("companion_radio_status.php",
+    {
+        method: "GET",
+        cache: "no-store",
+        headers:
+        {
+            "Accept": "application/json"
+        }
+    });
+}
+
+const NOISE_FLOOR_CONFIG =
+{
+    minDbm: -120,
+    maxDbm: -70,
+
+    greenMaxDbm: -110,
+    yellowMaxDbm: -96
+};
+
+function noiseFloorPercent(noiseFloor)
+{
+    const minDbm = NOISE_FLOOR_CONFIG.minDbm;
+    const maxDbm = NOISE_FLOOR_CONFIG.maxDbm;
+    const clamped = Math.max(minDbm, Math.min(maxDbm, noiseFloor));
+
+    return ((clamped - minDbm) / (maxDbm - minDbm)) * 100.0;
+}
+
+function noiseFloorState(noiseFloor)
+{
+    if (noiseFloor <= NOISE_FLOOR_CONFIG.greenMaxDbm)
+    {
+        return "green";
+    }
+
+    if (noiseFloor <= NOISE_FLOOR_CONFIG.yellowMaxDbm)
+    {
+        return "yellow";
+    }
+
+    return "red";
+}
+
+function renderNoiseFloor(noiseFloor, updatedAt)
+{
+    if (!el.noiseFloorMeter || !el.noiseFloorFill || !el.noiseFloorText)
+    {
+        return;
+    }
+
+    if (!Number.isFinite(noiseFloor))
+    {
+        el.noiseFloorMeter.classList.remove("has-value");
+        el.noiseFloorFill.style.width = "0%";
+        el.noiseFloorFill.className = "noise-floor-fill";
+        el.noiseFloorText.textContent = "noise: --";
+        el.noiseFloorMeter.title = "Noise floor: kein Wert";
+
+        return;
+    }
+
+    const roundedNoiseFloor = Math.round(noiseFloor);
+    const stateLabel = noiseFloorState(noiseFloor);
+    const percent = noiseFloorPercent(noiseFloor);
+
+    el.noiseFloorMeter.classList.add("has-value");
+    el.noiseFloorMeter.dataset.state = stateLabel;
+
+    el.noiseFloorFill.className = `noise-floor-fill ${stateLabel}`;
+    el.noiseFloorFill.style.width = `${percent}%`;
+
+    el.noiseFloorText.textContent = `noise: ${roundedNoiseFloor}dBm`;
+    el.noiseFloorMeter.title =
+        `Noise floor: ${noiseFloor.toFixed(1)} dBm` +
+        (updatedAt ? `\nUpdate: ${updatedAt}` : "");
+}
+
+async function refreshNoiseFloor()
+{
+    try
+    {
+        const data = await loadCompanionRadioStatus();
+        const status = data && data.status ? data.status : null;
+        const noiseFloor = status && status.noise_floor !== null ? Number(status.noise_floor) : NaN;
+        renderNoiseFloor(noiseFloor, status ? status.updated_at : null);
+    }
+    catch (err)
+    {
+        console.error("Noise floor refresh failed:", err);
+        renderNoiseFloor(NaN, null);
+    }
+}
+
 async function startDiscover()
 {
     return await fetchJson("discover_start.php",
@@ -2390,6 +2490,89 @@ function formatDistanceMeters(distance)
     return `${(distance / 1000.0).toFixed(2)} km`;
 }
 
+const MAX_AMBIGUOUS_HOP_NEIGHBOR_DISTANCE_M = 100000.0;
+
+function pruneImplausibleResolvedHops(resolvedFromBack, endpoint)
+{
+    const resolvedForward = resolvedFromBack.slice().reverse();
+
+    if (!Array.isArray(resolvedForward) || resolvedForward.length < 3)
+    {
+        return resolvedFromBack;
+    }
+
+    const endpointRef =
+    {
+        kind: "endpoint",
+        name: endpoint.name || "endpoint",
+        lat_e6: Number(endpoint.latitude_e6),
+        lon_e6: Number(endpoint.longitude_e6)
+    };
+
+    for (let index = 1; index < resolvedForward.length - 1; index += 1)
+    {
+        const currentHop = resolvedForward[index];
+        const prevHop = resolvedForward[index - 1];
+        const nextHop = resolvedForward[index + 1];
+
+        if (!currentHop || !currentHop.selected)
+        {
+            continue;
+        }
+
+        if (!prevHop || !prevHop.selected)
+        {
+            continue;
+        }
+
+        let nextRef = null;
+
+        if (nextHop && nextHop.selected)
+        {
+            nextRef =
+            {
+                lat_e6: Number(nextHop.selected.adv_lat_e6),
+                lon_e6: Number(nextHop.selected.adv_lon_e6)
+            };
+        }
+        else if (index === resolvedForward.length - 2)
+        {
+            nextRef = endpointRef;
+        }
+        else
+        {
+            continue;
+        }
+
+        const distanceBeforeM = distanceMeters(
+            Number(prevHop.selected.adv_lat_e6),
+            Number(prevHop.selected.adv_lon_e6),
+            Number(currentHop.selected.adv_lat_e6),
+            Number(currentHop.selected.adv_lon_e6)
+        );
+
+        const distanceAfterM = distanceMeters(
+            Number(currentHop.selected.adv_lat_e6),
+            Number(currentHop.selected.adv_lon_e6),
+            Number(nextRef.lat_e6),
+            Number(nextRef.lon_e6)
+        );
+
+        if (
+            Number.isFinite(distanceBeforeM) &&
+            Number.isFinite(distanceAfterM) &&
+            distanceBeforeM > MAX_AMBIGUOUS_HOP_NEIGHBOR_DISTANCE_M &&
+            distanceAfterM > MAX_AMBIGUOUS_HOP_NEIGHBOR_DISTANCE_M
+        )
+        {
+            currentHop.selected = null;
+            currentHop.note = "discarded_implausible_long_before_after";
+        }
+    }
+
+    return resolvedForward.reverse();
+}
+
 function resolvePathGreedyFromEndpoint(pathEntry, endpoint)
 {
     let lastSelectedPrefix6Hex = "";
@@ -2530,18 +2713,20 @@ function resolvePathGreedyFromEndpoint(pathEntry, endpoint)
         };
     }
 
-    const unresolvedCount = resolvedFromBack.filter(function(hop)
+    const prunedResolvedFromBack = pruneImplausibleResolvedHops(resolvedFromBack, endpoint);
+
+    const unresolvedCount = prunedResolvedFromBack.filter(function(hop)
     {
         return !hop.selected;
     }).length;
 
     result.resolved = (unresolvedCount === 0);
     result.resolved_fully = (unresolvedCount === 0);
-    result.resolved_partially = (resolvedFromBack.length > 0);
+    result.resolved_partially = (prunedResolvedFromBack.length > 0);
     result.resolution_mode = (unresolvedCount === 0)
         ? "greedy_from_endpoint"
         : "partial_greedy_from_endpoint";
-    result.resolved_hops = resolvedFromBack.reverse();
+    result.resolved_hops = prunedResolvedFromBack.reverse();
 
     return result;
 }
@@ -4773,6 +4958,13 @@ showEmptyRightPanel();
         updatePageTitle("");
     }
 })();
+
+refreshNoiseFloor();
+
+state.noiseFloorRefreshTimer = setInterval(function()
+{
+    refreshNoiseFloor();
+}, 3000);
 
 setInterval(function()
 {

@@ -2,6 +2,11 @@
 
 #include <chrono>
 
+static bool startsWith(const std::string &s, const std::string &prefix)
+{
+    return s.rfind(prefix, 0) == 0;
+}
+
 static bool containsCode(const std::vector<uint8_t>& codes, uint8_t code)
 {
     for (uint8_t c : codes)
@@ -30,12 +35,47 @@ bool MeshCoreLink::start(const std::string &device)
 {
     stop();
 
-    if (!m_port.open(device))
+    if (startsWith(device, "tcp://"))
     {
-        return false;
+        std::string target = device.substr(6);
+
+        std::string host = target;
+        uint16_t port = 0;
+
+        size_t colon = target.rfind(':');
+
+        if (colon != std::string::npos)
+        {
+            host = target.substr(0, colon);
+            port = static_cast<uint16_t>(std::stoi(target.substr(colon + 1)));
+        }
+        else
+        {
+            return false;
+        }
+
+        auto tcp = std::make_unique<TcpPort>();
+
+        if (!tcp->open(host, port))
+        {
+            return false;
+        }
+
+        m_stream = std::move(tcp);
+    }
+    else
+    {
+        auto serial = std::make_unique<SerialPort>();
+
+        if (!serial->open(device))
+        {
+            return false;
+        }
+
+        m_stream = std::move(serial);
     }
 
-    m_framer.emplace(m_port);
+    m_framer.emplace(*m_stream);
 
     m_running = true;
     m_rxThread = std::thread(&MeshCoreLink::rxLoop, this);
@@ -65,12 +105,17 @@ void MeshCoreLink::stop()
     }
 
     m_framer.reset();
-    m_port.close();
+
+    if (m_stream)
+    {
+        m_stream->close();
+        m_stream.reset();
+    }
 }
 
 bool MeshCoreLink::isRunning() const
 {
-    return m_running.load() && m_port.isOpen();
+    return m_running.load() && m_stream && m_stream->isOpen();
 }
 
 void MeshCoreLink::setPushCallback(PushCallback cb)

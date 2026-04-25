@@ -45,6 +45,7 @@ public:
 
     void ProcessCompanionActions();
     bool ProcessSingleCompanionAction(const MeshDB::CompanionAction& action);
+    void PollRadioStatus();
 
 private:
     bool ShouldRunContactSync();
@@ -95,4 +96,5 @@ private:
     bool ApplyPendingChannelUpsert(const MeshDB::ChannelRecord& rec);
     bool ApplyPendingChannelDelete(const MeshDB::ChannelRecord& rec);
     std::chrono::steady_clock::time_point m_nextChannelSyncPollAt;
+    std::chrono::steady_clock::time_point m_nextRadioStatusPollAt;
 };
