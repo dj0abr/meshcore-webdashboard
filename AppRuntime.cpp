@@ -8,6 +8,7 @@
 #include <iomanip>
 #include <algorithm>
 #include <cctype>
+#include <map>
 #include <openssl/sha.h>
 
 static constexpr unsigned DISCOVER_COOLDOWN_SECONDS = 5;
@@ -163,11 +164,7 @@ bool AppRuntime::InitializeClient()
     }
 
     m_client.setManualAddContacts(false);
-    if (!m_client.syncClock())
-    {
-        std::cerr << "syncClock() failed\n";
-        return false;
-    }
+    m_client.syncClock();
     m_client.sendSelfAdvert(true);
 
     auto id = m_client.getNodeID();
@@ -250,8 +247,84 @@ void AppRuntime::SyncContacts()
 
     std::cout << "[SYNC] peers=" << peers->size() << "\n";
 
-    for (const auto& p : *peers)
+    std::map<std::string, size_t> newestByName;
+
+    for (size_t i = 0; i < peers->size(); i++)
     {
+        const auto& p = (*peers)[i];
+
+        if (p.name.empty())
+        {
+            continue;
+        }
+
+        auto it = newestByName.find(p.name);
+
+        if (it == newestByName.end())
+        {
+            newestByName[p.name] = i;
+            continue;
+        }
+
+        const auto& oldBest = (*peers)[it->second];
+
+        if (p.lastAdvert > oldBest.lastAdvert)
+        {
+            newestByName[p.name] = i;
+        }
+    }
+
+    std::vector<bool> keep(peers->size(), true);
+
+    for (const auto& kv : newestByName)
+    {
+        const std::string& name = kv.first;
+        const size_t newestIdx = kv.second;
+
+        for (size_t i = 0; i < peers->size(); i++)
+        {
+            const auto& p = (*peers)[i];
+
+            if (p.name != name)
+            {
+                continue;
+            }
+
+            if (i == newestIdx)
+            {
+                continue;
+            }
+
+            keep[i] = false;
+
+            std::cout << "[SYNC] removing duplicate companion contact name=\""
+                      << p.name
+                      << "\" old_node_id="
+                      << p.nodeId()
+                      << " last_advert="
+                      << p.lastAdvert
+                      << "\n";
+
+            if (!m_client.removeContact(p.publicKey))
+            {
+                std::cout << "[SYNC] removeContact failed for node_id="
+                          << p.nodeId()
+                          << " name=\""
+                          << p.name
+                          << "\"\n";
+            }
+        }
+    }
+
+    for (size_t i = 0; i < peers->size(); i++)
+    {
+        if (!keep[i])
+        {
+            continue;
+        }
+
+        const auto& p = (*peers)[i];
+
         DataConnector::AdvertInfo adv {};
 
         adv.nodeId = p.nodeId();

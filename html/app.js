@@ -9,6 +9,7 @@ const el =
     chatView: document.getElementById("chatView"),
     chatTitle: document.getElementById("chatTitle"),
     callsignFilter: document.getElementById("callsignFilter"),
+    activeFilter: document.getElementById("activeFilter"),
     chatBody: document.getElementById("chatBody"),
     chatTabsView: document.getElementById("chatTabsView"),
     tabMessagesViewBtn: document.getElementById("tabMessagesViewBtn"),
@@ -36,11 +37,7 @@ const el =
     tabNodesBtn: document.getElementById("tabNodesBtn"),
     tabChannelsBtn: document.getElementById("tabChannelsBtn"),
     channelsList: document.getElementById("channelsList"),
-    createPrivateChannelBtn: document.getElementById("createPrivateChannelBtn"),
-    joinPrivateChannelBtn: document.getElementById("joinPrivateChannelBtn"),
-    joinPublicChannelBtn: document.getElementById("joinPublicChannelBtn"),
-    joinHashtagChannelBtn: document.getElementById("joinHashtagChannelBtn"),
-    removeChannelBtn: document.getElementById("removeChannelBtn"),
+    channelActionSelect: document.getElementById("channelActionSelect"),
     channelModal: document.getElementById("channelModal"),
     channelModalTitle: document.getElementById("channelModalTitle"),
     channelModalSubtitle: document.getElementById("channelModalSubtitle"),
@@ -269,9 +266,8 @@ function updateResetPathButton()
     const canReset = /^[0-9A-Fa-f]{64}$/.test(publicKeyHex);
 
     el.resetPathButton.style.display =
-        state.rightPanelMode === "map" && canReset
-            ? ""
-            : "none";
+        state.rightPanelMode === "map" && 
+        canReset ? "" : "none";
 
     el.resetPathButton.disabled = !canReset || state.resetPathPending;
 }
@@ -401,6 +397,12 @@ function buildPreferredPathMapPoints(preferredPath)
 
 function showPreferredPathInPathMap(correlationKey, preferredPath)
 {
+    if (!state.chatRow || !isChannelRow(state.chatRow))
+    {
+        hideChatPathMap();
+        return;
+    }
+
     if (!el.chatTabsView || !el.chatPathMapPanel || !el.chatPathMap)
     {
         return;
@@ -1250,7 +1252,12 @@ function stopTxPolling(txId)
 
 function activateChatTab(tabName)
 {
-    state.rightTab = tabName === "pathmap" ? "pathmap" : "messages";
+    const canUsePathMap = state.chatRow && isChannelRow(state.chatRow);
+
+    state.rightTab =
+        tabName === "pathmap" && canUsePathMap
+            ? "pathmap"
+            : "messages";
 
     if (el.messagesTabView)
     {
@@ -1269,6 +1276,7 @@ function activateChatTab(tabName)
 
     if (el.tabPathMapViewBtn)
     {
+        el.tabPathMapViewBtn.style.display = canUsePathMap ? "" : "none";
         el.tabPathMapViewBtn.classList.toggle("active", state.rightTab === "pathmap");
     }
 
@@ -3978,6 +3986,14 @@ table = new Tabulator("#nodesTable",
                 }
             }
 
+            if (el.activeFilter && el.activeFilter.checked)
+            {
+                if (!isChatLikeNode(node) || Number(node.msg_count || 0) < 1)
+                {
+                    return false;
+                }
+            }
+
             return true;
         });
     },
@@ -4642,6 +4658,15 @@ if (el.callsignFilter)
     });
 }
 
+if (el.activeFilter)
+{
+    el.activeFilter.addEventListener("change", function()
+    {
+        el.tableError.innerHTML = "";
+        table.replaceData();
+    });
+}
+
 if (el.allMapButton)
 {
     el.allMapButton.addEventListener("click", function()
@@ -4784,43 +4809,20 @@ if (el.advertButton)
     el.advertButton.addEventListener("click", sendFloodAdvert);
 }
 
-if (el.createPrivateChannelBtn)
+if (el.channelActionSelect)
 {
-    el.createPrivateChannelBtn.addEventListener("click", function()
+    el.channelActionSelect.addEventListener("change", function()
     {
-        openChannelDialog("create_private");
-    });
-}
+        const action = el.channelActionSelect.value;
 
-if (el.joinPrivateChannelBtn)
-{
-    el.joinPrivateChannelBtn.addEventListener("click", function()
-    {
-        openChannelDialog("join_private");
-    });
-}
+        if (!action)
+        {
+            return;
+        }
 
-if (el.joinPublicChannelBtn)
-{
-    el.joinPublicChannelBtn.addEventListener("click", function()
-    {
-        openChannelDialog("join_public");
-    });
-}
+        openChannelDialog(action);
 
-if (el.joinHashtagChannelBtn)
-{
-    el.joinHashtagChannelBtn.addEventListener("click", function()
-    {
-        openChannelDialog("join_hashtag");
-    });
-}
-
-if (el.removeChannelBtn)
-{
-    el.removeChannelBtn.addEventListener("click", function()
-    {
-        openChannelDialog("remove");
+        el.channelActionSelect.value = "";
     });
 }
 

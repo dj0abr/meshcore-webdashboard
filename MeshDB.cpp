@@ -384,6 +384,7 @@ bool MeshDB::EnsureSchema()
         "    advert_type TINYINT UNSIGNED NOT NULL DEFAULT 0,"
         "    advert_flags TINYINT UNSIGNED NOT NULL DEFAULT 0,"
         "    name VARCHAR(64) NOT NULL DEFAULT '',"
+        "    name_key VARCHAR(64) GENERATED ALWAYS AS (NULLIF(TRIM(name), '')) PERSISTENT,"
         "    public_key_hex CHAR(64) DEFAULT NULL,"
         "    prefix6_hex CHAR(12) DEFAULT NULL,"
         "    adv_lat_e6 INT DEFAULT NULL,"
@@ -396,6 +397,7 @@ bool MeshDB::EnsureSchema()
         "    UNIQUE KEY uq_nodes_node_id (node_id),"
         "    UNIQUE KEY uq_nodes_public_key_hex (public_key_hex),"
         "    UNIQUE KEY uq_nodes_prefix6_hex (prefix6_hex),"
+        "    UNIQUE KEY uq_nodes_name_key (name_key),"
         "    KEY idx_nodes_name (name),"
         "    KEY idx_nodes_last_advert_at (last_advert_at)"
         ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4";
@@ -748,15 +750,15 @@ bool MeshDB::UpsertNodeFromAdvert(const DataConnector::AdvertInfo& info)
 
     oss
         << ") ON DUPLICATE KEY UPDATE "
-        << "node_id=VALUES(node_id), "
-        << "advert_type=VALUES(advert_type), "
-        << "advert_flags=VALUES(advert_flags), "
-        << "name=VALUES(name), "
-        << "public_key_hex=VALUES(public_key_hex), "
-        << "prefix6_hex=VALUES(prefix6_hex), "
-        << "last_advert_at=VALUES(last_advert_at), "
-        << "adv_lat_e6=VALUES(adv_lat_e6), "
-        << "adv_lon_e6=VALUES(adv_lon_e6), "
+        << "node_id=IF(VALUES(last_advert_at) >= COALESCE(last_advert_at, '1970-01-01 00:00:00'), VALUES(node_id), node_id), "
+        << "advert_type=IF(VALUES(last_advert_at) >= COALESCE(last_advert_at, '1970-01-01 00:00:00'), VALUES(advert_type), advert_type), "
+        << "advert_flags=IF(VALUES(last_advert_at) >= COALESCE(last_advert_at, '1970-01-01 00:00:00'), VALUES(advert_flags), advert_flags), "
+        << "name=IF(VALUES(name) <> '', VALUES(name), name), "
+        << "public_key_hex=IF(VALUES(last_advert_at) >= COALESCE(last_advert_at, '1970-01-01 00:00:00'), VALUES(public_key_hex), public_key_hex), "
+        << "prefix6_hex=IF(VALUES(last_advert_at) >= COALESCE(last_advert_at, '1970-01-01 00:00:00'), VALUES(prefix6_hex), prefix6_hex), "
+        << "last_advert_at=IF(VALUES(last_advert_at) >= COALESCE(last_advert_at, '1970-01-01 00:00:00'), VALUES(last_advert_at), last_advert_at), "
+        << "adv_lat_e6=IF(VALUES(last_advert_at) >= COALESCE(last_advert_at, '1970-01-01 00:00:00'), COALESCE(VALUES(adv_lat_e6), adv_lat_e6), adv_lat_e6), "
+        << "adv_lon_e6=IF(VALUES(last_advert_at) >= COALESCE(last_advert_at, '1970-01-01 00:00:00'), COALESCE(VALUES(adv_lon_e6), adv_lon_e6), adv_lon_e6), "
         << "updated_at=CURRENT_TIMESTAMP";
 
     return Execute(oss.str());
@@ -779,7 +781,7 @@ bool MeshDB::UpsertNodeFromPushAdvert(const DataConnector::PushAdvertInfo& info)
         << ToSqlString(prefix6Hex) << ", "
         << ToSqlString(info.name)
         << ") ON DUPLICATE KEY UPDATE "
-        << "name=VALUES(name), "
+        << "name=IF(name = '' AND VALUES(name) <> '', VALUES(name), name), "
         << "updated_at=CURRENT_TIMESTAMP";
 
     return Execute(oss.str());
@@ -827,16 +829,16 @@ bool MeshDB::UpsertNodeFromPushNewAdvert(const DataConnector::PushNewAdvertInfo&
 
     oss
         << ") ON DUPLICATE KEY UPDATE "
-        << "node_id=VALUES(node_id), "
-        << "advert_type=VALUES(advert_type), "
-        << "advert_flags=VALUES(advert_flags), "
-        << "name=VALUES(name), "
-        << "public_key_hex=VALUES(public_key_hex), "
-        << "prefix6_hex=VALUES(prefix6_hex), "
-        << "last_advert_at=COALESCE(VALUES(last_advert_at), last_advert_at), "
-        << "last_mod_at=VALUES(last_mod_at), "
-        << "adv_lat_e6=COALESCE(VALUES(adv_lat_e6), adv_lat_e6), "
-        << "adv_lon_e6=COALESCE(VALUES(adv_lon_e6), adv_lon_e6), "
+        << "node_id=IF(VALUES(last_advert_at) >= COALESCE(last_advert_at, '1970-01-01 00:00:00'), VALUES(node_id), node_id), "
+        << "advert_type=IF(VALUES(last_advert_at) >= COALESCE(last_advert_at, '1970-01-01 00:00:00'), VALUES(advert_type), advert_type), "
+        << "advert_flags=IF(VALUES(last_advert_at) >= COALESCE(last_advert_at, '1970-01-01 00:00:00'), VALUES(advert_flags), advert_flags), "
+        << "name=IF(VALUES(name) <> '', VALUES(name), name), "
+        << "public_key_hex=IF(VALUES(last_advert_at) >= COALESCE(last_advert_at, '1970-01-01 00:00:00'), VALUES(public_key_hex), public_key_hex), "
+        << "prefix6_hex=IF(VALUES(last_advert_at) >= COALESCE(last_advert_at, '1970-01-01 00:00:00'), VALUES(prefix6_hex), prefix6_hex), "
+        << "last_advert_at=IF(VALUES(last_advert_at) >= COALESCE(last_advert_at, '1970-01-01 00:00:00'), VALUES(last_advert_at), last_advert_at), "
+        << "last_mod_at=IF(VALUES(last_mod_at) >= COALESCE(last_mod_at, '1970-01-01 00:00:00'), VALUES(last_mod_at), last_mod_at), "
+        << "adv_lat_e6=IF(VALUES(last_advert_at) >= COALESCE(last_advert_at, '1970-01-01 00:00:00'), COALESCE(VALUES(adv_lat_e6), adv_lat_e6), adv_lat_e6), "
+        << "adv_lon_e6=IF(VALUES(last_advert_at) >= COALESCE(last_advert_at, '1970-01-01 00:00:00'), COALESCE(VALUES(adv_lon_e6), adv_lon_e6), adv_lon_e6), "
         << "updated_at=CURRENT_TIMESTAMP";
 
     return Execute(oss.str());

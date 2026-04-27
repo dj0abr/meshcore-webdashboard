@@ -29,6 +29,7 @@ namespace MeshCoreProto
     static constexpr uint8_t CMD_SET_RADIO_TX_POWER = 12;
     static constexpr uint8_t CMD_RESET_PATH = 13;
     static constexpr uint8_t CMD_SET_ADVERT_LATLON = 14;
+    static constexpr uint8_t CMD_REMOVE_CONTACT = 15;
     static constexpr uint8_t CMD_DEVICE_QUERY      = 22;
     static constexpr uint8_t CMD_SEND_LOGIN        = 26;
     static constexpr uint8_t CMD_SET_OTHER_PARAMS  = 38;

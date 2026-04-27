@@ -882,7 +882,7 @@
             margin-bottom: 0.75rem;
         }
 
-        .channels-toolbar button
+        .channels-toolbar select
         {
             border: 1px solid #666;
             background: #222;
@@ -890,9 +890,10 @@
             padding: 0.45rem 0.7rem;
             cursor: pointer;
             border-radius: 0.35rem;
+            width: 100%;
         }
 
-        .channels-toolbar button:hover
+        .channels-toolbar select:hover
         {
             background: #2d2d2d;
         }
@@ -1436,6 +1437,11 @@
                     Callsign
                 </label>
 
+                <label class="checkbox-label" title="Nur Kontakte mit Chat-Nachrichten anzeigen">
+                    <input type="checkbox" id="activeFilter">
+                    Active
+                </label>
+
                 <button id="allMapButton" class="toolbar-button" type="button" data-i18n="toolbar.all_map">AllMap</button>
                 <button id="advertButton" class="toolbar-button" type="button" data-i18n="toolbar.advert">Advert</button>
             </div>
@@ -1454,11 +1460,14 @@
 
                     <div id="channelsPanel" class="sidebar-panel">
                         <div class="channels-toolbar">
-                            <button id="createPrivateChannelBtn" type="button" data-i18n="channel.button.create_private">Create Private</button>
-                            <button id="joinPrivateChannelBtn" type="button" data-i18n="channel.button.join_private">Join Private</button>
-                            <button id="joinPublicChannelBtn" type="button" data-i18n="channel.button.join_public">Join Public</button>
-                            <button id="joinHashtagChannelBtn" type="button" data-i18n="channel.button.join_hashtag">Join Hashtag</button>
-                            <button id="removeChannelBtn" type="button" data-i18n="channel.button.remove">Remove</button>
+                            <select id="channelActionSelect">
+                                <option value="">Action...</option>
+                                <option value="create_private" data-i18n="channel.button.create_private">Create Private</option>
+                                <option value="join_private" data-i18n="channel.button.join_private">Join Private</option>
+                                <option value="join_public" data-i18n="channel.button.join_public">Join Public</option>
+                                <option value="join_hashtag" data-i18n="channel.button.join_hashtag">Join Hashtag</option>
+                                <option value="remove" data-i18n="channel.button.remove">Remove</option>
+                            </select>
                         </div>
 
                         <div id="channelsList" class="channels-list"></div>
