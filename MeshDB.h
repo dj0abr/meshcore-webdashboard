@@ -285,6 +285,8 @@ public:
         uint8_t channelIdx,
         const std::string& messageText);
 
+    static bool UpdateNodeAdvertPathFromRxLog(const DataConnector::PushRxLogInfo& info);
+
 private:
 
     static bool ConnectServer();

@@ -785,8 +785,18 @@
         .sidebar-tabs
         {
             display: flex;
+            align-items: center;
             gap: 0.5rem;
             margin-bottom: 0.75rem;
+        }
+
+        .sidebar-tabs-help
+        {
+            margin-left: 0.5rem;
+            color: var(--muted);
+            font-size: 11px;
+            line-height: 1.25;
+            white-space: nowrap;
         }
 
         .sidebar-tab
@@ -1452,6 +1462,10 @@
                     <div class="sidebar-tabs">
                         <button id="tabNodesBtn" class="sidebar-tab active" type="button" data-i18n="tabs.contacts">Contacts</button>
                         <button id="tabChannelsBtn" class="sidebar-tab" type="button" data-i18n="tabs.channels">Channels</button>
+                        <div class="sidebar-tabs-help" data-i18n-html="tabs.mouse_help">
+                            Maus links: chat<br>
+                            Maus rechts: map
+                        </div>
                     </div>
 
                     <div id="nodesPanel" class="sidebar-panel active">
@@ -1484,6 +1498,24 @@
                 </div>
 
                 <div id="rightPanelActions" style="display:flex; align-items:center; gap:10px;">
+                    <button
+                        id="mapPositionButton"
+                        class="toolbar-button"
+                        type="button"
+                        style="display:none;"
+                    >
+                        Position
+                    </button>
+
+                    <button
+                        id="mapPathButton"
+                        class="toolbar-button"
+                        type="button"
+                        style="display:none;"
+                    >
+                        Path
+                    </button>
+
                     <button
                         id="resetPathButton"
                         class="toolbar-button"

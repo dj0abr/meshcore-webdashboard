@@ -72,6 +72,8 @@ const el =
     rightPanelTitle: document.getElementById("rightPanelTitle"),
     rightPanelSubtitle: document.getElementById("rightPanelSubtitle"),
     rightPanelActions: document.getElementById("rightPanelActions"),
+    mapPositionButton: document.getElementById("mapPositionButton"),
+    mapPathButton: document.getElementById("mapPathButton"),
     resetPathButton: document.getElementById("resetPathButton"),
     noiseFloorMeter: document.getElementById("noiseFloorMeter"),
     noiseFloorFill: document.getElementById("noiseFloorFill"),
@@ -254,22 +256,29 @@ function setRightPanelHeader(title, subtitle = "")
     }
 }
 
-function updateResetPathButton()
+function updateMapActionButtons()
 {
-    if (!el.resetPathButton)
-    {
-        return;
-    }
-
     const row = state.mapContextRow;
+    const isMapMode = state.rightPanelMode === "map" && !!row;
     const publicKeyHex = String(row?.public_key_hex || "").trim();
     const canReset = /^[0-9A-Fa-f]{64}$/.test(publicKeyHex);
+    const hasAdvertPath = String(row?.last_advert_path_text || "").trim() !== "";
 
-    el.resetPathButton.style.display =
-        state.rightPanelMode === "map" && 
-        canReset ? "" : "none";
+    if (el.mapPositionButton)
+    {
+        el.mapPositionButton.style.display = isMapMode && hasLocation(row) ? "" : "none";
+    }
 
-    el.resetPathButton.disabled = !canReset || state.resetPathPending;
+    if (el.mapPathButton)
+    {
+        el.mapPathButton.style.display = isMapMode && hasAdvertPath ? "" : "none";
+    }
+
+    if (el.resetPathButton)
+    {
+        el.resetPathButton.style.display = isMapMode && canReset ? "" : "none";
+        el.resetPathButton.disabled = !canReset || state.resetPathPending;
+    }
 }
 
 function setRightPanelMode(mode, row = null)
@@ -281,9 +290,14 @@ function setRightPanelMode(mode, row = null)
     {
         const rowName = String(row?.name || "").trim();
 
+        let subtitle = rowName;
+        if(row?.last_advert_path_len !== null) subtitle += " Hops: " + row?.last_advert_path_len;
+        if(row?.last_advert_path_hash_size !== null) subtitle += " / Hash: " + row?.last_advert_path_hash_size + " Bytes";
+        if(row?.last_advert_path_text !== null) subtitle += " / Path: " + row?.last_advert_path_text;
+
         setRightPanelHeader(
             tr("panel.map", "Map"),
-            rowName !== "" ? rowName : ""
+            subtitle !== "" ? subtitle : ""
         );
     }
     else
@@ -291,7 +305,7 @@ function setRightPanelMode(mode, row = null)
         setRightPanelHeader(tr("panel.messages", "Messages"), "");
     }
 
-    updateResetPathButton();
+    updateMapActionButtons();
 }
 
 function ensureChatPathMap()
@@ -351,6 +365,22 @@ function buildPreferredPathMapPoints(preferredPath)
     }
 
     const points = [];
+
+    if (
+        preferredPath.source &&
+        hasValidCoords(preferredPath.source)
+    )
+    {
+        points.push(
+        {
+            type: "source",
+            name: preferredPath.source.name || "Node",
+            lat: Number(preferredPath.source.adv_lat_e6) / 1000000.0,
+            lon: Number(preferredPath.source.adv_lon_e6) / 1000000.0,
+            distance_m: null
+        });
+    }
+
     const hops = Array.isArray(preferredPath.hops) ? preferredPath.hops : [];
 
     hops.forEach(function(hop)
@@ -1952,6 +1982,175 @@ function showMapForRow(row)
     {
         map.invalidateSize();
     }, 0);
+}
+
+async function showNodeAdvertPath(row)
+{
+    if (!row || !row.id)
+    {
+        return;
+    }
+
+    const pathText = String(row.last_advert_path_text || "").trim();
+
+    if (pathText === "")
+    {
+        showMapForRow(row);
+        return;
+    }
+
+    try
+    {
+        state.rightView = "map";
+        setRightPanelMode("map", row);
+        resetChatState();
+        setChatInputEnabled(false);
+
+        const data = await fetchJson(
+            `node_path.php?node_id=${encodeURIComponent(row.id)}&_=${Date.now()}`
+        );
+
+        const endpoint = data.endpoint || null;
+        const pathEntry = data.path || null;
+
+        if (!pathEntry)
+        {
+            showMapForRow(row);
+            return;
+        }
+
+        const resolvedPath = resolvePathGreedyFromEndpoint(pathEntry, endpoint);
+        const preferredPath = buildResolvedPathListEntry(resolvedPath, endpoint);
+
+        preferredPath.source =
+        {
+            name: data.node?.name || row.name || "",
+            adv_lat_e6: data.node?.adv_lat_e6 ?? row.adv_lat_e6 ?? null,
+            adv_lon_e6: data.node?.adv_lon_e6 ?? row.adv_lon_e6 ?? null
+        };
+
+        hideRightPanelViews();
+        hideChatPathMap();
+
+        if (!el.mapView)
+        {
+            return;
+        }
+
+        el.mapView.style.display = "block";
+
+        const map = ensureMap();
+
+        if (!map || !state.leafletMarkers)
+        {
+            return;
+        }
+
+        const points = buildPreferredPathMapPoints(preferredPath);
+
+        if (points.length === 0)
+        {
+            showMapForRow(row);
+            return;
+        }
+
+        state.leafletMarkers.clearLayers();
+
+        const latlngs = [];
+
+        points.forEach(function(point)
+        {
+            const latlng = [point.lat, point.lon];
+            latlngs.push(latlng);
+
+            let label = point.name;
+
+            if (point.type === "source")
+            {
+                label = `Node: ${point.name}`;
+            }
+            else if (point.type === "endpoint")
+            {
+                label = `Endpoint: ${point.name}`;
+            }
+            else
+            {
+                label = `Hop ${point.hop_index}: ${point.name}`;
+            }
+
+            const circle = L.circleMarker(latlng,
+            {
+                radius: point.type === "source" ? 8 : 6,
+                color: "#0a203bff",
+                weight: 2,
+                fillColor: "#60a5fa",
+                fillOpacity: 0.8
+            }).addTo(state.leafletMarkers);
+
+            circle.bindPopup(escapeHtml(label));
+
+            circle.bindTooltip(point.name,
+            {
+                permanent: true,
+                direction: "top",
+                offset: [0, -8]
+            });
+        });
+
+        if (latlngs.length >= 2)
+        {
+            for (let index = 0; index < points.length - 1; index += 1)
+            {
+                const fromPoint = points[index];
+                const toPoint = points[index + 1];
+
+                L.polyline(
+                [
+                    [fromPoint.lat, fromPoint.lon],
+                    [toPoint.lat, toPoint.lon]
+                ],
+                {
+                    weight: 2
+                }).addTo(state.leafletMarkers);
+
+                if (fromPoint.distance_m !== null)
+                {
+                    const midLat = (fromPoint.lat + toPoint.lat) / 2.0;
+                    const midLon = (fromPoint.lon + toPoint.lon) / 2.0;
+                    const distanceKm = fromPoint.distance_m / 1000.0;
+
+                    L.marker([midLat, midLon],
+                    {
+                        interactive: false,
+                        icon: L.divIcon(
+                        {
+                            className: "path-distance-label",
+                            html: `<div>${distanceKm.toFixed(1)} km</div>`
+                        })
+                    }).addTo(state.leafletMarkers);
+                }
+            }
+        }
+
+        setTimeout(function()
+        {
+            map.invalidateSize();
+
+            if (latlngs.length === 1)
+            {
+                map.setView(latlngs[0], 13);
+            }
+            else
+            {
+                map.fitBounds(latlngs, { padding: [30, 30] });
+            }
+        }, 0);
+    }
+    catch (error)
+    {
+        console.error("Advert-Pfad konnte nicht geladen werden:", error);
+        window.alert(`Advert-Pfad konnte nicht geladen werden: ${error.message || "Unbekannter Fehler"}`);
+    }
 }
 
 function showAllNodesMap()
@@ -4555,7 +4754,7 @@ async function handleResetPathButtonClick()
     }
 
     state.resetPathPending = true;
-    updateResetPathButton();
+    updateMapActionButtons();
 
     try
     {
@@ -4577,7 +4776,7 @@ async function handleResetPathButtonClick()
     finally
     {
         state.resetPathPending = false;
-        updateResetPathButton();
+        updateMapActionButtons();
     }
 }
 
@@ -4585,6 +4784,22 @@ if (el.resetPathButton)
 {
     el.resetPathButton.textContent = tr("map.reset_path", "Pfad löschen");
 }
+
+el.mapPositionButton?.addEventListener("click", function()
+{
+    if (state.mapContextRow)
+    {
+        showMapForRow(state.mapContextRow);
+    }
+});
+
+el.mapPathButton?.addEventListener("click", function()
+{
+    if (state.mapContextRow)
+    {
+        showNodeAdvertPath(state.mapContextRow);
+    }
+});
 
 el.resetPathButton?.addEventListener("click", function()
 {

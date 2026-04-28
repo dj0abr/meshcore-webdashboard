@@ -425,7 +425,12 @@ void MeshRxLogDecoder::DecodeRfPacket(DecodedPacket &pkt)
 {
     if (pkt.rfPacket.size() < 2)
     {
-        throw std::runtime_error("RF-Paket zu kurz");
+        std::cerr << "[RX_LOG DECODER] RF-Paket zu kurz: size="
+                  << pkt.rfPacket.size()
+                  << std::endl;
+
+        pkt.valid = false;
+        return;
     }
 
     size_t offset = 0;
@@ -441,7 +446,14 @@ void MeshRxLogDecoder::DecodeRfPacket(DecodedPacket &pkt)
 
     if (pkt.pathHashSizeCode == 3)
     {
-        throw std::runtime_error("Reservierter/ungueltiger pathHashSizeCode = 3");
+        std::cerr << "[RX_LOG DECODER] Reservierter/ungueltiger pathHashSizeCode=3"
+                  << " header=0x" << std::hex << static_cast<int>(pkt.header)
+                  << " pathMeta=0x" << static_cast<int>(pkt.pathMeta)
+                  << std::dec
+                  << std::endl;
+
+        pkt.valid = false;
+        return;
     }
 
     pkt.pathHashSize = static_cast<uint8_t>(pkt.pathHashSizeCode + 1);
@@ -451,7 +463,17 @@ void MeshRxLogDecoder::DecodeRfPacket(DecodedPacket &pkt)
 
     if (pkt.rfPacket.size() < offset + pathBytes)
     {
-        throw std::runtime_error("RF-Paket enthaelt nicht genug Bytes fuer den Pfad");
+        std::cerr << "[RX_LOG DECODER] RF-Paket enthaelt nicht genug Bytes fuer den Pfad"
+                  << " rfPacket.size=" << pkt.rfPacket.size()
+                  << " offset=" << offset
+                  << " pathLen=" << static_cast<int>(pkt.pathLen)
+                  << " pathHashSize=" << static_cast<int>(pkt.pathHashSize)
+                  << " pathBytes=" << pathBytes
+                  << " needed=" << (offset + pathBytes)
+                  << std::endl;
+
+        pkt.valid = false;
+        return;
     }
 
     pkt.hops.clear();
@@ -460,11 +482,13 @@ void MeshRxLogDecoder::DecodeRfPacket(DecodedPacket &pkt)
     for (uint8_t i = 0; i < pkt.pathLen; ++i)
     {
         std::vector<uint8_t> hop;
+
         hop.insert(
             hop.end(),
             pkt.rfPacket.begin() + offset,
             pkt.rfPacket.begin() + offset + pkt.pathHashSize
         );
+
         pkt.hops.push_back(std::move(hop));
         offset += pkt.pathHashSize;
     }
@@ -699,7 +723,8 @@ void MeshRxLogDecoder::DecodeGroupTextPayload(DecodedPacket &pkt, const std::str
 
     if (pkt.pktPayload.size() < 3)
     {
-        throw std::runtime_error("GRP_TXT-Payload zu kurz");
+        printf("GRP_TXT-Payload zu kurz\n");
+        return;
     }
 
     size_t offset = 0;

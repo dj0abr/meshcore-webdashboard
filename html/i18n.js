@@ -22,6 +22,7 @@ const I18N =
 
         "tabs.contacts": "Kontakte",
         "tabs.channels": "Kanäle",
+        "tabs.mouse_help": "Maus links: Chat<br>Maus rechts: Karte",
 
         "chat.title.default": "Chat",
         "chat.input_placeholder": "Nachricht eingeben und Enter drücken ...",
@@ -204,6 +205,7 @@ const I18N =
 
         "tabs.contacts": "Contacts",
         "tabs.channels": "Channels",
+        "tabs.mouse_help": "Left mouse: chat<br>Right mouse: map",
 
         "chat.title.default": "Chat",
         "chat.input_placeholder": "Enter message and press Enter ...",
@@ -387,6 +389,7 @@ const I18N =
 
         "tabs.contacts": "Contactos",
         "tabs.channels": "Canales",
+        "tabs.mouse_help": "Clic izquierdo: chat<br>Clic derecho: mapa",
 
         "chat.title.default": "Chat",
         "chat.input_placeholder": "Escribe un mensaje y pulsa Enter ...",
@@ -570,6 +573,7 @@ const I18N =
 
         "tabs.contacts": "Contacts",
         "tabs.channels": "Canaux",
+        "tabs.mouse_help": "Clic gauche : chat<br>Clic droit : carte",
 
         "chat.title.default": "Chat",
         "chat.input_placeholder": "Saisissez un message et appuyez sur Entrée ...",
@@ -753,6 +757,7 @@ const I18N =
 
         "tabs.contacts": "Contatti",
         "tabs.channels": "Canali",
+        "tabs.mouse_help": "Clic sinistro: chat<br>Clic destro: mappa",
 
         "chat.title.default": "Chat",
         "chat.input_placeholder": "Inserisci un messaggio e premi Invio ...",

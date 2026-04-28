@@ -402,9 +402,20 @@ bool MeshDB::EnsureSchema()
         "    KEY idx_nodes_last_advert_at (last_advert_at)"
         ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4";
 
-    const char* sqlTxOutbox =
-        "CREATE TABLE IF NOT EXISTS tx_outbox ("
-        "    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,"
+        const char* sqlNodeAdvertPaths =
+            "CREATE TABLE IF NOT EXISTS node_advert_paths ("
+            "    public_key_hex CHAR(64) NOT NULL,"
+            "    path_len TINYINT UNSIGNED DEFAULT NULL,"
+            "    path_hash_size TINYINT UNSIGNED DEFAULT NULL,"
+            "    path_text TEXT DEFAULT NULL,"
+            "    last_seen_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,"
+            "    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,"
+            "    PRIMARY KEY (public_key_hex),"
+            "    KEY idx_node_advert_paths_last_seen_at (last_seen_at)"
+            ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4";
+
+        const char* sqlTxOutbox =
+            "CREATE TABLE IF NOT EXISTS tx_outbox ("        "    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,"
         "    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,"
         "    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,"
         "    tx_kind TINYINT UNSIGNED NOT NULL COMMENT '0=direct,1=room,2=floodAdvert,3=channel',"
@@ -623,6 +634,7 @@ bool MeshDB::EnsureSchema()
         ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4";
     return Execute(sqlNodes)
         && Execute(sqlTxOutbox)
+        && Execute(sqlNodeAdvertPaths)
         && Execute(sqlRoomCredentials)
         && Execute(sqlChannels)
         && Execute(sqlChatMessages)
@@ -2875,6 +2887,14 @@ bool MeshDB::StorePushRxLog(const DataConnector::PushRxLogInfo& info, const std:
         return false;
     }
 
+    if (info.payloadType == 4 && info.advertValid)
+    {
+        if (!UpdateNodeAdvertPathFromRxLog(info))
+        {
+            return false;
+        }
+    }
+
     (void)summary;
     return true;
 }
@@ -3269,4 +3289,38 @@ bool MeshDB::EnqueueChannelTxFromBot(
         << ")";
 
     return Execute(chatSql.str());
+}
+
+bool MeshDB::UpdateNodeAdvertPathFromRxLog(const DataConnector::PushRxLogInfo& info)
+{
+    if (!info.hasAdvertPublicKey || info.advertPublicKey.empty())
+    {
+        return true;
+    }
+
+    if (!info.hasPathLen || !info.hasPathHashSize || info.pathText.empty())
+    {
+        return true;
+    }
+
+    std::ostringstream sql;
+
+    sql
+        << "INSERT INTO node_advert_paths ("
+        << "public_key_hex, path_len, path_hash_size, path_text, last_seen_at"
+        << ") VALUES ("
+        << ToSqlString(info.advertPublicKey) << ", "
+        << unsigned(info.pathLen) << ", "
+        << unsigned(info.pathHashSize) << ", "
+        << ToSqlString(info.pathText) << ", "
+        << "CURRENT_TIMESTAMP"
+        << ") "
+        << "ON DUPLICATE KEY UPDATE "
+        << "path_len = VALUES(path_len), "
+        << "path_hash_size = VALUES(path_hash_size), "
+        << "path_text = VALUES(path_text), "
+        << "last_seen_at = VALUES(last_seen_at), "
+        << "updated_at = CURRENT_TIMESTAMP";
+
+    return Execute(sql.str());
 }

@@ -65,8 +65,14 @@ try
             n.advert_flags,
             n.adv_lat_e6,
             n.adv_lon_e6,
+            p.path_len AS last_advert_path_len,
+            p.path_hash_size AS last_advert_path_hash_size,
+            p.path_text AS last_advert_path_text,
+            p.last_seen_at AS last_advert_path_at,
             COUNT(cm.id) AS msg_count
         FROM nodes n
+        LEFT JOIN node_advert_paths p
+            ON LOWER(p.public_key_hex) = LOWER(n.public_key_hex)
         LEFT JOIN chat_messages cm
             ON cm.name = n.name
         AND (
@@ -107,7 +113,11 @@ try
             n.last_mod_at,
             n.advert_flags,
             n.adv_lat_e6,
-            n.adv_lon_e6
+            n.adv_lon_e6,
+            p.path_len,
+            p.path_hash_size,
+            p.path_text,
+            p.last_seen_at
         ORDER BY
             n.name ASC
     ";
@@ -132,8 +142,12 @@ try
             'updated_at' => $row['updated_at'],
             'last_mod_at' => $row['last_mod_at'],
             'advert_flags' => ($row['advert_flags'] !== null) ? (int) $row['advert_flags'] : null,
-            'adv_lat' => isset($row['adv_lat_e6']) ? ((int) $row['adv_lat_e6'] / 1000000.0) : null,
-            'adv_lon' => isset($row['adv_lon_e6']) ? ((int) $row['adv_lon_e6'] / 1000000.0) : null,
+            'adv_lat' => ($row['adv_lat_e6'] !== null) ? ((int) $row['adv_lat_e6'] / 1000000.0) : null,
+            'adv_lon' => ($row['adv_lon_e6'] !== null) ? ((int) $row['adv_lon_e6'] / 1000000.0) : null,
+            'last_advert_path_len' => ($row['last_advert_path_len'] !== null) ? (int) $row['last_advert_path_len'] : null,
+            'last_advert_path_hash_size' => ($row['last_advert_path_hash_size'] !== null) ? (int) $row['last_advert_path_hash_size'] : null,
+            'last_advert_path_text' => $row['last_advert_path_text'],
+            'last_advert_path_at' => $row['last_advert_path_at'],
             'msg_count' => (int) $row['msg_count'],
         ];
     }
