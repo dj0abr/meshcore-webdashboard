@@ -1,4 +1,5 @@
 #include "MeshRxLogDecoder.h"
+#include "MeshCoreProto.h"
 #include "MeshDB.h"
 
 #include <iomanip>
@@ -415,7 +416,7 @@ void MeshRxLogDecoder::DecodeBytes(DecodedPacket &pkt, const std::string &resolv
 
     DecodeRfPacket(pkt);
 
-    if (pkt.payloadType == 5)
+    if (pkt.payloadType == MeshCoreProto::PAYLOAD_TYPE_GRP_TXT)
     {
         DecodeGroupTextPayload(pkt, resolvedFromName);
     }
@@ -496,11 +497,11 @@ void MeshRxLogDecoder::DecodeRfPacket(DecodedPacket &pkt)
     pkt.pktPayload.assign(pkt.rfPacket.begin() + offset, pkt.rfPacket.end());
     pkt.pktHash = CalcPktHash(pkt.pktPayload);
 
-    if (pkt.payloadType == 4)
+    if (pkt.payloadType == MeshCoreProto::PAYLOAD_TYPE_ADVERT)
     {
         DecodeAdvertPayload(pkt);
     }
-    else if (pkt.payloadType == 0)
+    else if (pkt.payloadType == MeshCoreProto::PAYLOAD_TYPE_REQ)
     {
         DecodeReqPayload(pkt);
     }
@@ -868,7 +869,7 @@ void MeshRxLogDecoder::PrintDecodedPacket(const MeshRxLogDecoder::DecodedPacket 
               << std::dec << ")" << std::endl;
     std::cout << std::endl;
 
-    if (pkt.payloadType == 4)
+    if (pkt.payloadType == MeshCoreProto::PAYLOAD_TYPE_ADVERT)
     {
         std::cout << "ADVERT-Payload:" << std::endl;
 
@@ -922,7 +923,7 @@ void MeshRxLogDecoder::PrintDecodedPacket(const MeshRxLogDecoder::DecodedPacket 
         std::cout << std::endl;
     }
 
-    if (pkt.payloadType == 0)
+    if (pkt.payloadType == MeshCoreProto::PAYLOAD_TYPE_REQ)
     {
         std::cout << "REQ-Payload:" << std::endl;
 
@@ -944,7 +945,7 @@ void MeshRxLogDecoder::PrintDecodedPacket(const MeshRxLogDecoder::DecodedPacket 
         std::cout << std::endl;
     }
 
-    if (pkt.payloadType == 5)
+    if (pkt.payloadType == MeshCoreProto::PAYLOAD_TYPE_GRP_TXT)
     {
         std::cout << "GRP_TXT-Payload:" << std::endl;
 

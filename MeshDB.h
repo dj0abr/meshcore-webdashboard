@@ -172,6 +172,14 @@ public:
     static bool StorePushNewAdvert(const DataConnector::PushNewAdvertInfo& info, const std::string& summary);
     static bool StorePushUnknown(const DataConnector::PushUnknownInfo& info, const std::string& summary);
     static bool StoreCompanionRadioStatusJson(const std::string& jsonText);
+    static bool StoreCompanionRadioConnected(bool connected);
+
+    static bool StoreCompanionRadioStatus(
+        const std::string& jsonText,
+        std::optional<uint16_t> batteryMv,
+        std::optional<uint32_t> uptimeSecs,
+        std::optional<uint16_t> errors,
+        std::optional<uint8_t> queueLen);
 
     static std::optional<OutgoingTx> FetchNextQueuedTx();
     static std::vector<OutgoingTx> FetchTimedOutWaitingTx(unsigned int limit);

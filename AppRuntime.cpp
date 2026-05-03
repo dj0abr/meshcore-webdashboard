@@ -12,7 +12,7 @@
 #include <openssl/sha.h>
 
 static constexpr unsigned DISCOVER_COOLDOWN_SECONDS = 5;
-static constexpr unsigned RADIO_STATUS_POLL_SECONDS = 10;
+static constexpr unsigned RADIO_STATUS_POLL_SECONDS = 20;
 
 static int HexNibble(char c)
 {
@@ -1606,24 +1606,54 @@ void AppRuntime::PollRadioStatus()
 
     m_nextRadioStatusPollAt = now + std::chrono::seconds(RADIO_STATUS_POLL_SECONDS);
 
-    auto stats = m_client.getRadioStats();
+    auto radioStats = m_client.getRadioStats();
+    auto coreStats = m_client.getCoreStats();
 
-    if (!stats.has_value())
+    if (!radioStats.has_value() && !coreStats.has_value())
     {
-        std::cerr << "[radio_status] getRadioStats() failed\n";
+        std::cerr << "[radio_status] getRadioStats() and getCoreStats() failed\n";
+        MeshDB::StoreCompanionRadioConnected(false);
         return;
     }
+    MeshDB::StoreCompanionRadioConnected(true);
 
     std::ostringstream oss;
-    oss << "{"
-        << "\"noise_floor\":" << stats->noiseFloor << ","
-        << "\"last_rssi\":" << stats->lastRssi << ","
-        << "\"last_snr\":" << std::fixed << std::setprecision(1) << stats->lastSnr << ","
-        << "\"tx_air_secs\":" << stats->txAirSecs << ","
-        << "\"rx_air_secs\":" << stats->rxAirSecs
-        << "}";
+    oss << "{";
 
-    if (!MeshDB::StoreCompanionRadioStatusJson(oss.str()))
+    bool needComma = false;
+
+    if (radioStats.has_value())
+    {
+        oss << "\"noise_floor\":" << radioStats->noiseFloor << ","
+            << "\"last_rssi\":" << radioStats->lastRssi << ","
+            << "\"last_snr\":" << std::fixed << std::setprecision(1) << radioStats->lastSnr << ","
+            << "\"tx_air_secs\":" << radioStats->txAirSecs << ","
+            << "\"rx_air_secs\":" << radioStats->rxAirSecs;
+
+        needComma = true;
+    }
+
+    if (coreStats.has_value())
+    {
+        if (needComma)
+        {
+            oss << ",";
+        }
+
+        oss << "\"battery_mv\":" << coreStats->batteryMv << ","
+            << "\"uptime_secs\":" << coreStats->uptimeSecs << ","
+            << "\"errors\":" << coreStats->errors << ","
+            << "\"queue_len\":" << static_cast<unsigned>(coreStats->queueLen);
+    }
+
+    oss << "}";
+
+    if (!MeshDB::StoreCompanionRadioStatus(
+            oss.str(),
+            coreStats.has_value() ? std::optional<uint16_t>(coreStats->batteryMv) : std::nullopt,
+            coreStats.has_value() ? std::optional<uint32_t>(coreStats->uptimeSecs) : std::nullopt,
+            coreStats.has_value() ? std::optional<uint16_t>(coreStats->errors) : std::nullopt,
+            coreStats.has_value() ? std::optional<uint8_t>(coreStats->queueLen) : std::nullopt))
     {
         std::cerr << "[radio_status] database update failed\n";
     }

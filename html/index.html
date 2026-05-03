@@ -483,11 +483,14 @@
             color: #bfdbfe;
             font-size: 11px;
             font-weight: 700;
-            line-height: 1;
-            vertical-align: middle;
-            box-shadow: 0 0 4px rgba(96,165,250,0.35);
         }
 
+        .message-badge.has-unread
+        {
+            background: rgba(34, 197, 94, 0.35);
+            border-color: rgba(34, 197, 94, 0.75);
+            color: #dcfce7;
+        }
         .node-name-wrap
         {
             display: inline-flex;
@@ -871,6 +874,22 @@
             font-weight: 600;
         }
 
+        .channel-item.channel-has-unread
+        {
+            background: #145c25;
+            border-color: #35b957;
+        }
+
+        .channel-item.channel-has-unread:hover
+        {
+            background: #1b7430;
+        }
+
+        .channel-item.channel-has-unread.active
+        {
+            background: #1f8a3a;
+            border-color: #53d676;
+        }
         .channel-item-meta
         {
             display: block;
@@ -1154,7 +1173,7 @@
             display: flex;
             align-items: center;
             gap: 8px;
-            width: 220px;
+            width: 310px;
             margin-left: auto;
             margin-top: 6px;
             color: var(--muted);
@@ -1162,6 +1181,43 @@
             line-height: 1;
         }
 
+        .battery-voltage-text
+        {
+            min-width: 72px;
+            text-align: right;
+            white-space: nowrap;
+        }
+        .companion-link-status
+        {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 14px;
+            min-width: 14px;
+            margin-right: 12px;
+        }
+
+        .companion-link-led
+        {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            display: inline-block;
+            background: #dc2626;
+            box-shadow: 0 0 6px rgba(220, 38, 38, 0.75);
+        }
+
+        .companion-link-led.online
+        {
+            background: #16a34a;
+            box-shadow: 0 0 6px rgba(22, 163, 74, 0.85);
+        }
+
+        .companion-link-led.offline
+        {
+            background: #dc2626;
+            box-shadow: 0 0 6px rgba(220, 38, 38, 0.75);
+        }
         .noise-floor-track
         {
             position: relative;
@@ -1361,7 +1417,7 @@
             color: #000;
             border: none;
             padding: 0;
-            font-size: 12px;
+            font-size: 10px;
             font-weight: 600;
             white-space: nowrap;
         }
@@ -1388,6 +1444,71 @@
         .channel-item-meta.channel-has-messages
         {
             color: #ffd54f; /* angenehmes gelb */
+        }
+        .path-name-label
+        {
+            background: rgba(255, 255, 255, 0.6) !important;
+            border: none !important;
+            box-shadow: none !important;
+            color: black;
+            font-size: 10px;
+            font-weight: bold;
+            text-shadow: 0 0 3px white;
+        }
+
+        .path-name-label::before
+        {
+            display: none;
+        }
+        #mapViewWrapper
+        {
+            position: relative;
+            height: 100%;
+            min-height: 420px;
+        }
+
+        #mapView
+        {
+            height: 100%;
+            width: 100%;
+        }
+
+        #mapPathControls
+        {
+            position: absolute;
+            top: 12px;
+            left: 58px;
+            z-index: 1000;
+
+            display: none;
+            gap: 10px;
+            align-items: center;
+
+            padding: 6px 10px;
+            border-radius: 8px;
+
+            background: rgba(255, 255, 255, 0.85);
+            border: 1px solid rgba(0, 0, 0, 0.25);
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+
+            color: #111;
+            font-size: 13px;
+            font-weight: 600;
+        }
+
+        #mapPathControls label
+        {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            cursor: pointer;
+            user-select: none;
+            color: #111 !important;
+        }
+
+        #mapPathControls input
+        {
+            margin: 0;
         }
 </style>
 </head>
@@ -1419,6 +1540,10 @@
                 <div id="noiseFloorFill" class="noise-floor-fill"></div>
             </div>
             <div id="noiseFloorText" class="noise-floor-text">NF: --</div>
+            <div id="batteryVoltageText" class="battery-voltage-text">Batt: --</div>
+            <div class="companion-link-status" title="Companion connection">
+                <span id="companionLinkLed" class="companion-link-led offline"></span>
+            </div>
         </div>
     </header>
 
@@ -1529,7 +1654,25 @@
             </div>
 
             <div id="messagesPanelContent" class="panel-content">
-                <div id="mapView" class="map-frame" style="display:none;"></div>
+                <div id="mapViewWrapper" class="map-frame-wrapper" style="display:none;">
+                    <div id="mapPathControls" class="chat-path-map-header map-path-controls">
+                        <strong>Path</strong>
+
+                        <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+                            <label class="path-map-toggle">
+                                <input id="mapPathToggleNames" type="checkbox" checked>
+                                <span>Namen</span>
+                            </label>
+
+                            <label class="path-map-toggle">
+                                <input id="mapPathToggleDistances" type="checkbox" checked>
+                                <span>Entfernung</span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <div id="mapView"></div>
+                </div>
 
                 <div id="chatTabsView" class="chat-tabs-view" style="display:none;">
                     <div class="chat-tabs-bar">

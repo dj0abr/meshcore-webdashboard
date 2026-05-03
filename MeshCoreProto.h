@@ -78,6 +78,57 @@ namespace MeshCoreProto
     static constexpr uint8_t PUSH_CODE_BINARY_RESPONSE    = 0x8C;
     static constexpr uint8_t PUSH_CODE_CONTROL_DATA       = 0x8E;
 
+    // Payload Types
+    static constexpr uint8_t PAYLOAD_TYPE_REQ         = 0x00;
+    static constexpr uint8_t PAYLOAD_TYPE_RESPONSE    = 0x01;
+    static constexpr uint8_t PAYLOAD_TYPE_TXT_MSG     = 0x02;
+    static constexpr uint8_t PAYLOAD_TYPE_ACK         = 0x03;
+    static constexpr uint8_t PAYLOAD_TYPE_ADVERT      = 0x04;
+    static constexpr uint8_t PAYLOAD_TYPE_GRP_TXT     = 0x05;
+    static constexpr uint8_t PAYLOAD_TYPE_GRP_DATA    = 0x06;
+    static constexpr uint8_t PAYLOAD_TYPE_ANON_REQ    = 0x07;
+    static constexpr uint8_t PAYLOAD_TYPE_PATH        = 0x08;
+    static constexpr uint8_t PAYLOAD_TYPE_TRACE       = 0x09;
+    static constexpr uint8_t PAYLOAD_TYPE_MULTIPART   = 0x0A;
+    static constexpr uint8_t PAYLOAD_TYPE_CONTROL     = 0x0B;
+    static constexpr uint8_t PAYLOAD_TYPE_RESERVED_C  = 0x0C;
+    static constexpr uint8_t PAYLOAD_TYPE_RESERVED_D  = 0x0D;
+    static constexpr uint8_t PAYLOAD_TYPE_RESERVED_E  = 0x0E;
+    static constexpr uint8_t PAYLOAD_TYPE_RAW_CUSTOM  = 0x0F;
+
+    #include <cstdio>
+
+    static const char* payloadTypeToString(uint8_t type)
+    {
+        static char buffer[32];
+
+        const char* name;
+
+        switch (type)
+        {
+            case PAYLOAD_TYPE_REQ:         name = "REQ"; break;
+            case PAYLOAD_TYPE_RESPONSE:    name = "RESPONSE"; break;
+            case PAYLOAD_TYPE_TXT_MSG:     name = "TXT_MSG"; break;
+            case PAYLOAD_TYPE_ACK:         name = "ACK"; break;
+            case PAYLOAD_TYPE_ADVERT:      name = "ADVERT"; break;
+            case PAYLOAD_TYPE_GRP_TXT:     name = "GRP_TXT"; break;
+            case PAYLOAD_TYPE_GRP_DATA:    name = "GRP_DATA"; break;
+            case PAYLOAD_TYPE_ANON_REQ:    name = "ANON_REQ"; break;
+            case PAYLOAD_TYPE_PATH:        name = "PATH"; break;
+            case PAYLOAD_TYPE_TRACE:       name = "TRACE"; break;
+            case PAYLOAD_TYPE_MULTIPART:   name = "MULTIPART"; break;
+            case PAYLOAD_TYPE_CONTROL:     name = "CONTROL"; break;
+            case PAYLOAD_TYPE_RESERVED_C:  name = "RESERVED_C"; break;
+            case PAYLOAD_TYPE_RESERVED_D:  name = "RESERVED_D"; break;
+            case PAYLOAD_TYPE_RESERVED_E:  name = "RESERVED_E"; break;
+            case PAYLOAD_TYPE_RAW_CUSTOM:  name = "RAW_CUSTOM"; break;
+            default:                       name = "UNKNOWN"; break;
+        }
+
+        std::snprintf(buffer, sizeof(buffer), "0x%02X (%s)", type, name);
+        return buffer;
+    }
+
     // Endian helpers (wire is little-endian unless noted).
     uint32_t le32(const uint8_t *p);
     uint32_t be32(const uint8_t *p);

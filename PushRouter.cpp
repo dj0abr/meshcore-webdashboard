@@ -233,69 +233,88 @@ void PushRouter::HandleLoginFail(const std::vector<uint8_t>& payload)
     m_runtime.NotifyRoomLoginFail();
 }
 
+// Schalte log ein oder aus
+static bool g_rxLogDebug = false;
+#define RXDBG(x) do { if (g_rxLogDebug) { x; } } while (0)
+
 void PushRouter::HandleLogRxData(const std::vector<uint8_t>& payload)
 {
-    std::cout << "[DEBUG RX_LOG] HandleLogRxData called" << std::endl;
-    std::cout << "[DEBUG RX_LOG] payload.size=" << payload.size() << std::endl;
+    RXDBG(std::cout << "[DEBUG RX_LOG] HandleLogRxData called" << std::endl);
+    RXDBG(std::cout << "[DEBUG RX_LOG] payload.size=" << payload.size() << std::endl);
 
-    std::cout << "[DEBUG RX_LOG] RAW: ";
-    for (uint8_t b : payload)
-    {
-        printf("%02X ", b);
-    }
-    printf("\n");
+    RXDBG(
+        std::cout << "[DEBUG RX_LOG] RAW: ";
+        for (uint8_t b : payload)
+        {
+            printf("%02X ", b);
+        }
+        printf("\n");
+    );
 
     const MeshRxLogDecoder::DecodedPacket pkt =
         MeshRxLogDecoder::Decode(payload);
 
-    std::cout << "[DEBUG RX_LOG] Decode result:" << std::endl;
-    std::cout << "  valid=" << pkt.valid << std::endl;
-    std::cout << "  pushCode=" << static_cast<int>(pkt.pushCode) << std::endl;
-    std::cout << "  routeType=" << static_cast<int>(pkt.routeType) << std::endl;
-    std::cout << "  payloadType=" << static_cast<int>(pkt.payloadType) << std::endl;
-    std::cout << "  payloadVersion=" << static_cast<int>(pkt.payloadVersion) << std::endl;
+    RXDBG(std::cout << "[DEBUG RX_LOG] Decode result:" << std::endl);
+    RXDBG(std::cout << "  valid=" << pkt.valid << std::endl);
+    RXDBG(std::cout << "  pushCode=" << static_cast<int>(pkt.pushCode) << std::endl);
+    RXDBG(std::cout << "  routeType=" << static_cast<int>(pkt.routeType) << std::endl);
+    RXDBG(std::cout << "  payloadType=" << MeshCoreProto::payloadTypeToString(pkt.payloadType) << std::endl);
+    RXDBG(std::cout << "  payloadVersion=" << static_cast<int>(pkt.payloadVersion) << std::endl);
 
-    std::cout << "  snrDb=" << pkt.snrDb << std::endl;
-    std::cout << "  rssiDbm=" << pkt.rssiDbm << std::endl;
+    RXDBG(std::cout << "  snrDb=" << pkt.snrDb << std::endl);
+    RXDBG(std::cout << "  rssiDbm=" << pkt.rssiDbm << std::endl);
 
-    std::cout << "  pathLen=" << static_cast<int>(pkt.pathLen) << std::endl;
-    std::cout << "  pathHashSize=" << static_cast<int>(pkt.pathHashSize) << std::endl;
-    std::cout << "  pathText=" << MeshRxLogDecoder::FormatPath(pkt) << std::endl;
+    RXDBG(std::cout << "  pathLen=" << static_cast<int>(pkt.pathLen) << std::endl);
+    RXDBG(std::cout << "  pathHashSize=" << static_cast<int>(pkt.pathHashSize) << std::endl);
+    RXDBG(std::cout << "  pathText=" << MeshRxLogDecoder::FormatPath(pkt) << std::endl);
 
-    std::cout << "  pktHash=" << pkt.pktHash << std::endl;
-    std::cout << "  originalHex.size=" << pkt.originalHex.size() << std::endl;
+    RXDBG(
+        std::cout
+            << "  pktHash=0x"
+            << std::hex
+            << std::uppercase
+            << std::setw(8)
+            << std::setfill('0')
+            << pkt.pktHash
+            << std::dec
+            << std::endl;
+    );
 
-    std::cout << "  grpTxtValid=" << pkt.grpTxtValid << std::endl;
-    std::cout << "  grpResolvedChannelName=" << pkt.grpResolvedChannelName << std::endl;
-    std::cout << "  grpTimestamp=" << pkt.grpTimestamp << std::endl;
-    std::cout << "  grpTxtType=" << static_cast<int>(pkt.grpTxtType) << std::endl;
-    std::cout << "  grpText=" << pkt.grpText << std::endl;
+    RXDBG(std::cout << "  originalHex.size=" << pkt.originalHex.size() << std::endl);
 
-    std::cout << "  advertValid=" << pkt.advertValid << std::endl;
-    std::cout << "  advertPublicKey.size=" << pkt.advertPublicKey.size() << std::endl;
+    RXDBG(std::cout << "  grpTxtValid=" << pkt.grpTxtValid << std::endl);
+    RXDBG(std::cout << "  grpResolvedChannelName=" << pkt.grpResolvedChannelName << std::endl);
+    RXDBG(std::cout << "  grpTimestamp=" << pkt.grpTimestamp << std::endl);
+    RXDBG(std::cout << "  grpTxtType=" << static_cast<int>(pkt.grpTxtType) << std::endl);
+    RXDBG(std::cout << "  grpText=" << pkt.grpText << std::endl);
+
+    RXDBG(std::cout << "  advertValid=" << pkt.advertValid << std::endl);
+    RXDBG(std::cout << "  advertPublicKey.size=" << pkt.advertPublicKey.size() << std::endl);
 
     if (!pkt.advertPublicKey.empty())
     {
-        std::cout << "  advertPublicKey="
-                  << MeshRxLogDecoder::BytesToHex(pkt.advertPublicKey)
-                  << std::endl;
+        RXDBG(
+            std::cout << "  advertPublicKey="
+                      << MeshRxLogDecoder::BytesToHex(pkt.advertPublicKey)
+                      << std::endl;
+        );
     }
 
-    std::cout << "  advertTimestamp=" << pkt.advertTimestamp << std::endl;
-    std::cout << "  advertRole=" << static_cast<int>(pkt.advertRole) << std::endl;
-    std::cout << "  advertHasGps=" << pkt.advertHasGps << std::endl;
-    std::cout << "  advertHasBle=" << pkt.advertHasBle << std::endl;
-    std::cout << "  advertHasShortcut=" << pkt.advertHasShortcut << std::endl;
-    std::cout << "  advertHasName=" << pkt.advertHasName << std::endl;
-    std::cout << "  advertLocationValid=" << pkt.advertLocationValid << std::endl;
-    std::cout << "  advertLatitudeE6=" << pkt.advertLatitudeE6 << std::endl;
-    std::cout << "  advertLongitudeE6=" << pkt.advertLongitudeE6 << std::endl;
-    std::cout << "  advertName=" << pkt.advertName << std::endl;
+    RXDBG(std::cout << "  advertTimestamp=" << pkt.advertTimestamp << std::endl);
+    RXDBG(std::cout << "  advertRole=" << static_cast<int>(pkt.advertRole) << std::endl);
+    RXDBG(std::cout << "  advertHasGps=" << pkt.advertHasGps << std::endl);
+    RXDBG(std::cout << "  advertHasBle=" << pkt.advertHasBle << std::endl);
+    RXDBG(std::cout << "  advertHasShortcut=" << pkt.advertHasShortcut << std::endl);
+    RXDBG(std::cout << "  advertHasName=" << pkt.advertHasName << std::endl);
+    RXDBG(std::cout << "  advertLocationValid=" << pkt.advertLocationValid << std::endl);
+    RXDBG(std::cout << "  advertLatitudeE6=" << pkt.advertLatitudeE6 << std::endl);
+    RXDBG(std::cout << "  advertLongitudeE6=" << pkt.advertLongitudeE6 << std::endl);
+    RXDBG(std::cout << "  advertName=" << pkt.advertName << std::endl);
 
-    // Payload 5 = Grp-Text, also Messages, alles andere ist uninteressant (zumindest vorerst)
-    if (pkt.payloadType != 5 && pkt.payloadType != 4)
+    if (pkt.payloadType != MeshCoreProto::PAYLOAD_TYPE_GRP_TXT &&
+        pkt.payloadType != MeshCoreProto::PAYLOAD_TYPE_ADVERT)
     {
-        std::cout << "[DEBUG RX_LOG] DROP: payloadType != 4 bzw. 5" << std::endl;
+        std::cout << "[DEBUG RX_LOG] DROP: payloadType != 4 bzw. 5" << std::endl; // bleibt immer sichtbar
         return;
     }
 
@@ -305,7 +324,7 @@ void PushRouter::HandleLogRxData(const std::vector<uint8_t>& payload)
 
     if (!pkt.valid)
     {
-        std::cout << "[DEBUG RX_LOG] DROP/EMIT invalid packet" << std::endl;
+        std::cout << "[DEBUG RX_LOG] DROP/EMIT invalid packet" << std::endl; // Fehler → immer sichtbar
         DataConnector::Emit(info);
         return;
     }
@@ -333,21 +352,19 @@ void PushRouter::HandleLogRxData(const std::vector<uint8_t>& payload)
     info.rawHex = pkt.originalHex;
     info.pathText = MeshRxLogDecoder::FormatPath(pkt);
 
-    std::cout << "[DEBUG RX_LOG] info prepared:" << std::endl;
-    std::cout << "  info.pathLen=" << info.pathLen << std::endl;
-    std::cout << "  info.pathHashSize=" << info.pathHashSize << std::endl;
-    std::cout << "  info.pathText=" << info.pathText << std::endl;
-    std::cout << "  info.rawHex.size=" << info.rawHex.size() << std::endl;
+    RXDBG(std::cout << "[DEBUG RX_LOG] info prepared:" << std::endl);
+    RXDBG(std::cout << "  info.pathLen=" << info.pathLen << std::endl);
+    RXDBG(std::cout << "  info.pathHashSize=" << info.pathHashSize << std::endl);
+    RXDBG(std::cout << "  info.pathText=" << info.pathText << std::endl);
+    RXDBG(std::cout << "  info.rawHex.size=" << info.rawHex.size() << std::endl);
 
     if (pkt.grpTxtValid)
     {
-        std::cout << "[DEBUG RX_LOG] Processing group text" << std::endl;
+        RXDBG(std::cout << "[DEBUG RX_LOG] Processing group text" << std::endl);
 
         if (!pkt.grpResolvedChannelName.empty())
         {
-            std::cout << "  lookup channel name="
-                      << pkt.grpResolvedChannelName
-                      << std::endl;
+            RXDBG(std::cout << "  lookup channel name=" << pkt.grpResolvedChannelName << std::endl);
 
             const auto channelRec = MeshDB::FindChannelByName(pkt.grpResolvedChannelName);
 
@@ -356,11 +373,11 @@ void PushRouter::HandleLogRxData(const std::vector<uint8_t>& payload)
                 info.channelIdx = channelRec->channelIdx;
                 info.hasChannelIdx = true;
 
-                std::cout << "  channelIdx=" << info.channelIdx << std::endl;
+                RXDBG(std::cout << "  channelIdx=" << info.channelIdx << std::endl);
             }
             else
             {
-                std::cout << "  channel lookup failed" << std::endl;
+                std::cout << "  channel lookup failed" << std::endl; // Fehler → immer sichtbar
             }
         }
 
@@ -381,13 +398,13 @@ void PushRouter::HandleLogRxData(const std::vector<uint8_t>& payload)
                 info.txtType,
                 info.messageText);
 
-            std::cout << "  correlationKey=" << info.correlationKey << std::endl;
+            RXDBG(std::cout << "  correlationKey=" << info.correlationKey << std::endl);
         }
     }
 
     if (pkt.advertValid)
     {
-        std::cout << "[DEBUG RX_LOG] Processing advert inside RX_LOG" << std::endl;
+        RXDBG(std::cout << "[DEBUG RX_LOG] Processing advert inside RX_LOG" << std::endl);
 
         info.hasAdvert = true;
         info.advertValid = true;
@@ -409,9 +426,7 @@ void PushRouter::HandleLogRxData(const std::vector<uint8_t>& payload)
             info.advertPublicKey = pk;
             info.hasAdvertPublicKey = true;
 
-            std::cout << "  info.advertPublicKey="
-                      << info.advertPublicKey
-                      << std::endl;
+            RXDBG(std::cout << "  info.advertPublicKey=" << info.advertPublicKey << std::endl);
         }
 
         info.advertTimestamp = pkt.advertTimestamp;
@@ -440,8 +455,8 @@ void PushRouter::HandleLogRxData(const std::vector<uint8_t>& payload)
             info.advertLongitudeE6 = pkt.advertLongitudeE6;
             info.hasAdvertLongitudeE6 = true;
 
-            std::cout << "  info.advertLatitudeE6=" << info.advertLatitudeE6 << std::endl;
-            std::cout << "  info.advertLongitudeE6=" << info.advertLongitudeE6 << std::endl;
+            RXDBG(std::cout << "  info.advertLatitudeE6=" << info.advertLatitudeE6 << std::endl);
+            RXDBG(std::cout << "  info.advertLongitudeE6=" << info.advertLongitudeE6 << std::endl);
         }
 
         if (pkt.advertHasName && !pkt.advertName.empty())
@@ -449,11 +464,11 @@ void PushRouter::HandleLogRxData(const std::vector<uint8_t>& payload)
             info.advertName = pkt.advertName;
             info.hasAdvertName = true;
 
-            std::cout << "  info.advertName=" << info.advertName << std::endl;
+            RXDBG(std::cout << "  info.advertName=" << info.advertName << std::endl);
         }
     }
 
-    std::cout << "[DEBUG RX_LOG] Emit(info)" << std::endl;
+    RXDBG(std::cout << "[DEBUG RX_LOG] Emit(info)" << std::endl);
     DataConnector::Emit(info);
 }
 

@@ -161,6 +161,7 @@ try
         FROM nodes
         WHERE prefix6_hex IS NOT NULL
           AND LOWER(prefix6_hex) LIKE ?
+          AND advert_type = 2
         ORDER BY name ASC, prefix6_hex ASC
     ";
 

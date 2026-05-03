@@ -16,6 +16,10 @@ Backend und GUI kommunizieren über eine Datenbank.
 #include <iostream>
 #include <string>
 #include <thread>
+#include <atomic>
+#include <csignal>
+
+static std::atomic<bool> g_running(true);
 
 namespace
 {
@@ -50,66 +54,110 @@ namespace
     }
 }
 
+void SignalHandler(int signum)
+{
+    (void)signum;
+    g_running = false;
+}
+
+class CompanionConnectionGuard
+{
+public:
+    CompanionConnectionGuard() = default;
+
+    ~CompanionConnectionGuard()
+    {
+        MeshDB::StoreCompanionRadioConnected(false);
+    }
+
+    CompanionConnectionGuard(const CompanionConnectionGuard&) = delete;
+    CompanionConnectionGuard& operator=(const CompanionConnectionGuard&) = delete;
+};
+
 int main(int argc, char** argv)
 {
-    const std::string port = DeterminePort(argc, argv);
+    std::signal(SIGINT, SignalHandler);
+    std::signal(SIGTERM, SignalHandler);
 
-    if (!InitDatabase())
-    {
-        return 1;
-    }
+    try {
 
-    MeshCoreClient mc;
-    AppRuntime runtime(mc);
-    PushRouter pushRouter(mc, runtime);
-    MessageRouter messageRouter(mc);
+        const std::string port = DeterminePort(argc, argv);
 
-    pushRouter.Attach();
-    messageRouter.Attach();
-
-    if (!mc.connect(port))
-    {
-        std::cerr << "connect() failed for port " << port << "\n";
-        return 1;
-    }
-
-    if (!runtime.InitializeClient())
-    {
-        return 1;
-    }
-
-    runtime.StartupSync();
-
-    std::cout << "MeshCore Backend running on " << port << ". CTRL+C to exit.\n";
-
-    runtime.CheckAndApplyCompanionConfig(true);
-
-    // Starte Callsign Positionsergänzung
-    CallsignLocationBackfillThread::Config backfillCfg;
-    if (const char* v = std::getenv("MESHCORE_QRZ_USER"); v != nullptr)
-        backfillCfg.locationConfig.qrzUsername = v;
-    if (const char* v = std::getenv("MESHCORE_QRZ_PASS"); v != nullptr)
-        backfillCfg.locationConfig.qrzPassword = v;
-    backfillCfg.locationConfig.sessionCacheFile = "qrz_session_cache.txt";
-    backfillCfg.runInterval = std::chrono::hours(24);
-    backfillCfg.delayBetweenLookups = std::chrono::milliseconds(1500);
-    CallsignLocationBackfillThread callsignBackfill(backfillCfg);
-    callsignBackfill.Start();
-
-    while (mc.isConnected())
-    {
-        try
+        if (!InitDatabase())
         {
-            runtime.CheckAndApplyCompanionConfig(false);
-            runtime.Tick();
-        }
-        catch (const std::exception& e)
-        {
-            std::cerr << "[RUNTIME] error: " << e.what() << "\n";
+            return 1;
         }
 
-        std::this_thread::sleep_for(std::chrono::milliseconds(250));
-    }
+        CompanionConnectionGuard companionGuard;
 
-    return 0;
+        MeshCoreClient mc;
+        AppRuntime runtime(mc);
+        PushRouter pushRouter(mc, runtime);
+        MessageRouter messageRouter(mc);
+
+        pushRouter.Attach();
+        messageRouter.Attach();
+
+        if (!mc.connect(port))
+        {
+            std::cerr << "connect() failed for port " << port << "\n";
+            MeshDB::StoreCompanionRadioConnected(false);
+            return 1;
+        }
+
+        if (!runtime.InitializeClient())
+        {
+            return 1;
+        }
+
+        runtime.StartupSync();
+
+        std::cout << "MeshCore Backend running on " << port << ". CTRL+C to exit.\n";
+
+        runtime.CheckAndApplyCompanionConfig(true);
+
+        // Starte Callsign Positionsergänzung
+        CallsignLocationBackfillThread::Config backfillCfg;
+        if (const char* v = std::getenv("MESHCORE_QRZ_USER"); v != nullptr)
+            backfillCfg.locationConfig.qrzUsername = v;
+        if (const char* v = std::getenv("MESHCORE_QRZ_PASS"); v != nullptr)
+            backfillCfg.locationConfig.qrzPassword = v;
+        backfillCfg.locationConfig.sessionCacheFile = "qrz_session_cache.txt";
+        backfillCfg.runInterval = std::chrono::hours(24);
+        backfillCfg.delayBetweenLookups = std::chrono::milliseconds(1500);
+        CallsignLocationBackfillThread callsignBackfill(backfillCfg);
+        callsignBackfill.Start();
+
+        MeshDB::StoreCompanionRadioConnected(true);
+
+        while (g_running && mc.isConnected())
+        {
+            try
+            {
+                runtime.CheckAndApplyCompanionConfig(false);
+                runtime.Tick();
+            }
+            catch (const std::exception& e)
+            {
+                std::cerr << "[RUNTIME] error: " << e.what() << "\n";
+            }
+
+            std::this_thread::sleep_for(std::chrono::milliseconds(250));
+        }
+
+        std::cout << "Shutting down...\n";
+        MeshDB::StoreCompanionRadioConnected(false);
+
+        return 0;
+    }
+    catch (const std::exception& ex)
+    {
+        std::cerr << "Fatal exception: " << ex.what() << "\n";
+        return 1;
+    }
+    catch (...)
+    {
+        std::cerr << "Fatal unknown exception\n";
+        return 1;
+    }
 }

@@ -629,7 +629,12 @@ bool MeshDB::EnsureSchema()
         "CREATE TABLE IF NOT EXISTS companion_radio_status ("
         "    id TINYINT UNSIGNED NOT NULL,"
         "    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,"
+        "    connected TINYINT(1) NOT NULL DEFAULT 0,"
         "    json_text JSON NOT NULL,"
+        "    battery_mv INT UNSIGNED DEFAULT NULL,"
+        "    uptime_secs INT UNSIGNED DEFAULT NULL,"
+        "    errors INT UNSIGNED DEFAULT NULL,"
+        "    queue_len INT UNSIGNED DEFAULT NULL,"
         "    PRIMARY KEY (id)"
         ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4";
     return Execute(sqlNodes)
@@ -3204,6 +3209,21 @@ bool MeshDB::ResetTxRetryCount(unsigned long long id)
 
 bool MeshDB::StoreCompanionRadioStatusJson(const std::string& jsonText)
 {
+    return StoreCompanionRadioStatus(
+        jsonText,
+        std::nullopt,
+        std::nullopt,
+        std::nullopt,
+        std::nullopt);
+}
+
+bool MeshDB::StoreCompanionRadioStatus(
+    const std::string& jsonText,
+    std::optional<uint16_t> batteryMv,
+    std::optional<uint32_t> uptimeSecs,
+    std::optional<uint16_t> errors,
+    std::optional<uint8_t> queueLen)
+{
     std::lock_guard<std::mutex> lock(s_mutex);
 
     if (!s_ready || s_conn == nullptr)
@@ -3213,11 +3233,34 @@ bool MeshDB::StoreCompanionRadioStatusJson(const std::string& jsonText)
 
     const std::string jsonEsc = Escape(jsonText);
 
+    auto sqlValueOrNull = [](auto value) -> std::string
+    {
+        if (!value.has_value())
+        {
+            return "NULL";
+        }
+
+        return std::to_string(static_cast<unsigned long long>(*value));
+    };
+
     std::ostringstream oss;
-    oss << "INSERT INTO companion_radio_status (id, json_text) "
-        << "VALUES (1, '" << jsonEsc << "') "
-        << "ON DUPLICATE KEY UPDATE "
+    oss << "INSERT INTO companion_radio_status ("
+        << "id, connected, json_text, battery_mv, uptime_secs, errors, queue_len"
+        << ") VALUES ("
+        << "1, "
+        << "1, "
+        << "'" << jsonEsc << "', "
+        << sqlValueOrNull(batteryMv) << ", "
+        << sqlValueOrNull(uptimeSecs) << ", "
+        << sqlValueOrNull(errors) << ", "
+        << sqlValueOrNull(queueLen)
+        << ") ON DUPLICATE KEY UPDATE "
+        << "connected = VALUES(connected), "
         << "json_text = VALUES(json_text), "
+        << "battery_mv = VALUES(battery_mv), "
+        << "uptime_secs = VALUES(uptime_secs), "
+        << "errors = VALUES(errors), "
+        << "queue_len = VALUES(queue_len), "
         << "updated_at = CURRENT_TIMESTAMP";
 
     return Execute(oss.str());
@@ -3323,4 +3366,28 @@ bool MeshDB::UpdateNodeAdvertPathFromRxLog(const DataConnector::PushRxLogInfo& i
         << "updated_at = CURRENT_TIMESTAMP";
 
     return Execute(sql.str());
+}
+
+bool MeshDB::StoreCompanionRadioConnected(bool connected)
+{
+    std::lock_guard<std::mutex> lock(s_mutex);
+
+    if (!s_ready || s_conn == nullptr)
+    {
+        return false;
+    }
+
+    std::ostringstream oss;
+
+    oss << "INSERT INTO companion_radio_status ("
+        << "id, connected, json_text"
+        << ") VALUES ("
+        << "1, "
+        << (connected ? "1" : "0") << ", "
+        << "'{}'"
+        << ") ON DUPLICATE KEY UPDATE "
+        << "connected = VALUES(connected), "
+        << "updated_at = CURRENT_TIMESTAMP";
+
+    return Execute(oss.str());
 }

@@ -69,7 +69,8 @@ try
             p.path_hash_size AS last_advert_path_hash_size,
             p.path_text AS last_advert_path_text,
             p.last_seen_at AS last_advert_path_at,
-            COUNT(cm.id) AS msg_count
+            COUNT(cm.id) AS msg_count,
+            MAX(cm.timestamp_epoch) AS newest_msg_epoch
         FROM nodes n
         LEFT JOIN node_advert_paths p
             ON LOWER(p.public_key_hex) = LOWER(n.public_key_hex)
@@ -149,6 +150,7 @@ try
             'last_advert_path_text' => $row['last_advert_path_text'],
             'last_advert_path_at' => $row['last_advert_path_at'],
             'msg_count' => (int) $row['msg_count'],
+            'newest_msg_epoch' => ($row['newest_msg_epoch'] !== null) ? (int) $row['newest_msg_epoch'] : null,
         ];
     }
 

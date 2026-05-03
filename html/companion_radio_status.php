@@ -28,7 +28,9 @@ try
     $sql = "
         SELECT
             updated_at,
-            json_text
+            connected,
+            json_text,
+            battery_mv
         FROM companion_radio_status
         WHERE id = 1
         LIMIT 1
@@ -60,7 +62,11 @@ try
             'status' =>
             [
                 'updated_at' => $row['updated_at'],
+                'connected' => isset($row['connected']) ? (bool) $row['connected'] : false,
                 'noise_floor' => isset($status['noise_floor']) ? (float) $status['noise_floor'] : null,
+                'battery_mv' => $row['battery_mv'] !== null
+                    ? (int) $row['battery_mv']
+                    : (isset($status['battery_mv']) ? (int) $status['battery_mv'] : null),
                 'last_rssi' => isset($status['last_rssi']) ? (float) $status['last_rssi'] : null,
                 'last_snr' => isset($status['last_snr']) ? (float) $status['last_snr'] : null,
                 'tx_air_secs' => isset($status['tx_air_secs']) ? (int) $status['tx_air_secs'] : null,

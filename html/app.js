@@ -1,5 +1,7 @@
 let table = null;
 
+const CONTACT_READ_STORAGE_KEY = "meshcore.contactLastReadEpoch";
+
 const el =
 {
     nodeCount: document.getElementById("nodeCount"),
@@ -17,6 +19,10 @@ const el =
     messagesTabView: document.getElementById("messagesTabView"),
     pathMapTabView: document.getElementById("pathMapTabView"),
     allMapButton: document.getElementById("allMapButton"),
+    mapViewWrapper: document.getElementById("mapViewWrapper"),
+    mapPathControls: document.getElementById("mapPathControls"),
+    mapPathToggleNames: document.getElementById("mapPathToggleNames"),
+    mapPathToggleDistances: document.getElementById("mapPathToggleDistances"),
     mapView: document.getElementById("mapView"),
     chatInput: document.getElementById("chatInput"),
     chatSendButton: document.getElementById("chatSendButton"),
@@ -78,6 +84,8 @@ const el =
     noiseFloorMeter: document.getElementById("noiseFloorMeter"),
     noiseFloorFill: document.getElementById("noiseFloorFill"),
     noiseFloorText: document.getElementById("noiseFloorText"),
+    batteryVoltageText: document.getElementById("batteryVoltageText"),
+    companionLinkLed: document.getElementById("companionLinkLed"),
 };
 
 const state =
@@ -90,6 +98,7 @@ const state =
     chatPathShowDistances: true,
     chatPathLastCorrelationKey: "",
     chatPathLastPreferredPath: null,
+    lastNodeAdvertPathRow: null,
     autoZoom: true,
     rightView: "empty",
     chatRow: null,
@@ -146,6 +155,8 @@ const icons =
 };
 
 const DEBUG_ENABLED = false;
+
+const CHANNEL_READ_STORAGE_KEY = "meshcore.channelLastReadEpoch";
 
 function consoledebug()
 {
@@ -240,6 +251,55 @@ function showRepeaterInfo(row)
         el.mapEmpty.style.display = "grid";
         el.mapEmpty.style.justifyItems = "start";
         el.mapEmpty.style.alignItems = "start";
+    }
+}
+
+function renderBatteryVoltage(batteryMv, updatedAt)
+{
+    if (!el.batteryVoltageText)
+    {
+        return;
+    }
+
+    if (!Number.isFinite(batteryMv))
+    {
+        el.batteryVoltageText.textContent = "Batt: --";
+        el.batteryVoltageText.title = "Battery: kein Wert";
+
+        return;
+    }
+
+    const voltage = batteryMv / 1000.0;
+    const voltageText = voltage.toFixed(3).replace(".", ",");
+
+    el.batteryVoltageText.textContent = `Batt: ${voltageText} V`;
+    el.batteryVoltageText.title =
+        `Battery: ${voltage.toFixed(3)} V` +
+        (updatedAt ? `\nUpdate: ${updatedAt}` : "");
+}
+
+function renderCompanionLinkStatus(connected, updatedAt)
+{
+    if (!el.companionLinkLed)
+    {
+        return;
+    }
+
+    if (connected)
+    {
+        el.companionLinkLed.classList.remove("offline");
+        el.companionLinkLed.classList.add("online");
+        el.companionLinkLed.title =
+            "Companion: verbunden" +
+            (updatedAt ? `\nUpdate: ${updatedAt}` : "");
+    }
+    else
+    {
+        el.companionLinkLed.classList.remove("online");
+        el.companionLinkLed.classList.add("offline");
+        el.companionLinkLed.title =
+            "Companion: nicht verbunden" +
+            (updatedAt ? `\nLetztes Update: ${updatedAt}` : "");
     }
 }
 
@@ -485,8 +545,9 @@ function showPreferredPathInPathMap(correlationKey, preferredPath)
             circle.bindTooltip(point.name,
             {
                 permanent: true,
-                direction: "top",
-                offset: [0, -8]
+                direction: "center",
+                offset: [0, -1],
+                className: "path-name-label"
             });
         }
     });
@@ -1321,9 +1382,9 @@ function activateChatTab(tabName)
 
 function hideRightPanelViews()
 {
-    if (el.mapView)
+    if (el.mapViewWrapper)
     {
-        el.mapView.style.display = "none";
+        el.mapViewWrapper.style.display = "none";
     }
 
     if (el.chatTabsView)
@@ -1477,13 +1538,20 @@ async function refreshNoiseFloor()
     {
         const data = await loadCompanionRadioStatus();
         const status = data && data.status ? data.status : null;
+
         const noiseFloor = status && status.noise_floor !== null ? Number(status.noise_floor) : NaN;
+        const batteryMv = status && status.battery_mv !== null ? Number(status.battery_mv) : NaN;
+
         renderNoiseFloor(noiseFloor, status ? status.updated_at : null);
+        renderBatteryVoltage(batteryMv, status ? status.updated_at : null);
+        renderCompanionLinkStatus(status ? !!status.connected : false, status ? status.updated_at : null);
     }
     catch (err)
     {
         console.error("Noise floor refresh failed:", err);
         renderNoiseFloor(NaN, null);
+        renderBatteryVoltage(NaN, null);
+        renderCompanionLinkStatus(false, null);
     }
 }
 
@@ -1959,7 +2027,16 @@ function showMapForRow(row)
 
     hideRightPanelViews();
     hideChatPathMap();
-    el.mapView.style.display = "block";
+
+    if (el.mapViewWrapper)
+    {
+        el.mapViewWrapper.style.display = "block";
+    }
+
+    if (el.mapPathControls)
+    {
+        el.mapPathControls.style.display = "none";
+    }
 
     const map = ensureMap();
 
@@ -1982,6 +2059,11 @@ function showMapForRow(row)
     {
         map.invalidateSize();
     }, 0);
+
+    if (el.mapPathControls)
+    {
+        el.mapPathControls.style.display = "none";
+    }
 }
 
 async function showNodeAdvertPath(row)
@@ -1991,6 +2073,8 @@ async function showNodeAdvertPath(row)
         return;
     }
 
+    state.lastNodeAdvertPathRow = row;
+
     const pathText = String(row.last_advert_path_text || "").trim();
 
     if (pathText === "")
@@ -1998,6 +2082,7 @@ async function showNodeAdvertPath(row)
         showMapForRow(row);
         return;
     }
+
 
     try
     {
@@ -2037,7 +2122,22 @@ async function showNodeAdvertPath(row)
             return;
         }
 
-        el.mapView.style.display = "block";
+        el.mapViewWrapper.style.display = "block";
+
+        if (el.mapPathControls)
+        {
+            el.mapPathControls.style.display = "flex";
+        }
+
+        if (el.mapPathToggleNames)
+        {
+            el.mapPathToggleNames.checked = state.chatPathShowNames;
+        }
+
+        if (el.mapPathToggleDistances)
+        {
+            el.mapPathToggleDistances.checked = state.chatPathShowDistances;
+        }
 
         const map = ensureMap();
 
@@ -2089,12 +2189,16 @@ async function showNodeAdvertPath(row)
 
             circle.bindPopup(escapeHtml(label));
 
-            circle.bindTooltip(point.name,
+            if (state.chatPathShowNames)
             {
-                permanent: true,
-                direction: "top",
-                offset: [0, -8]
-            });
+                circle.bindTooltip(point.name,
+                {
+                    permanent: true,
+                    direction: "center",
+                    offset: [0, -1],
+                    className: "path-name-label"
+                });
+            }
         });
 
         if (latlngs.length >= 2)
@@ -2113,7 +2217,7 @@ async function showNodeAdvertPath(row)
                     weight: 2
                 }).addTo(state.leafletMarkers);
 
-                if (fromPoint.distance_m !== null)
+                if (state.chatPathShowDistances && fromPoint.distance_m !== null)
                 {
                     const midLat = (fromPoint.lat + toPoint.lat) / 2.0;
                     const midLon = (fromPoint.lon + toPoint.lon) / 2.0;
@@ -2151,6 +2255,8 @@ async function showNodeAdvertPath(row)
         console.error("Advert-Pfad konnte nicht geladen werden:", error);
         window.alert(`Advert-Pfad konnte nicht geladen werden: ${error.message || "Unbekannter Fehler"}`);
     }
+
+    
 }
 
 function showAllNodesMap()
@@ -2174,7 +2280,7 @@ function showAllNodesMap()
 
     hideRightPanelViews();
     hideChatPathMap();
-    el.mapView.style.display = "block";
+    el.mapViewWrapper.style.display = "block";
 
     const map = ensureMap();
 
@@ -2232,6 +2338,11 @@ function showAllNodesMap()
             state.autoZoom = false;
         }
     }, 0);
+
+    if (el.mapPathControls)
+    {
+        el.mapPathControls.style.display = "none";
+    }
 }
 
 function relativeTime(cell)
@@ -2395,6 +2506,79 @@ function advertTypeFormatter(cell)
     `;
 }
 
+function loadContactReadState()
+{
+    try
+    {
+        const raw = localStorage.getItem(CONTACT_READ_STORAGE_KEY);
+
+        if (!raw)
+        {
+            return {};
+        }
+
+        const parsed = JSON.parse(raw);
+
+        return parsed && typeof parsed === "object" ? parsed : {};
+    }
+    catch (err)
+    {
+        console.warn("Could not load contact read state:", err);
+        return {};
+    }
+}
+
+function saveContactReadState(readState)
+{
+    try
+    {
+        localStorage.setItem(CONTACT_READ_STORAGE_KEY, JSON.stringify(readState));
+    }
+    catch (err)
+    {
+        console.warn("Could not save contact read state:", err);
+    }
+}
+
+function getContactReadKey(row)
+{
+    return `${getChatKindValue(row)}:${String(row.name || "")}`;
+}
+
+function getContactLastReadEpoch(row)
+{
+    const readState = loadContactReadState();
+    const key = getContactReadKey(row);
+
+    return Number(readState[key] || 0);
+}
+
+function markContactAsRead(row)
+{
+    const key = getContactReadKey(row);
+
+    if (key === ":")
+    {
+        return;
+    }
+
+    const newestMessageEpoch = Number(row.newest_msg_epoch || 0);
+
+    if (!Number.isFinite(newestMessageEpoch) || newestMessageEpoch <= 0)
+    {
+        return;
+    }
+
+    const readState = loadContactReadState();
+
+    readState[key] = Math.max(
+        Number(readState[key] || 0),
+        newestMessageEpoch
+    );
+
+    saveContactReadState(readState);
+}
+
 function nameFormatter(cell)
 {
     const row = cell.getRow().getData();
@@ -2402,8 +2586,12 @@ function nameFormatter(cell)
     const safeName = escapeHtml(name);
     const msgCount = Number(row.msg_count) || 0;
 
+    const newestMessageEpoch = Number(row.newest_msg_epoch || 0);
+    const lastReadEpoch = getContactLastReadEpoch(row);
+    const unreadClass = newestMessageEpoch > lastReadEpoch ? " has-unread" : "";
+
     const badge = msgCount > 0
-        ? `<span class="message-badge">💬 ${msgCount}</span>`
+        ? `<span class="message-badge${unreadClass}">💬 ${msgCount}</span>`
         : "";
 
     if (isChatLikeNode(row) || hasLocation(row))
@@ -3330,8 +3518,10 @@ async function loadChatMessages(row, keepScrollIfPossible = true)
 
     const messages = data.messages || [];
     const newestId = messages.length > 0 ? Number(messages[messages.length - 1].id || 0) : 0;
+    const newestMessageEpoch = messages.length > 0
+        ? Number(messages[messages.length - 1].timestamp_epoch || 0)
+        : 0;
     const hasNewMessages = newestId > state.chatLastMessageId;
-
     const oldSerialized = JSON.stringify(state.chatMessages);
     const newSerialized = JSON.stringify(messages);
 
@@ -3342,6 +3532,32 @@ async function loadChatMessages(row, keepScrollIfPossible = true)
 
     renderChatMessages(messages);
     state.chatLastMessageId = newestId;
+
+    if (chatKind === "channel" && newestMessageEpoch > 0)
+    {
+        markChannelAsRead(
+        {
+            key_hex: row.key_hex,
+            newest_message_epoch: newestMessageEpoch
+        });
+
+        renderChannelsList();
+    }
+    else if (newestMessageEpoch > 0)
+    {
+        markContactAsRead(
+        {
+            name: row.name,
+            advert_type: row.advert_type,
+            advert_type_label: row.advert_type_label,
+            newest_msg_epoch: newestMessageEpoch
+        });
+
+        if (table)
+        {
+            table.redraw(true);
+        }
+    }
 
     requestAnimationFrame(function()
     {
@@ -3813,6 +4029,79 @@ function setLeftTab(tabName)
     updateLeftCounter();
 }
 
+function loadChannelReadState()
+{
+    try
+    {
+        const raw = localStorage.getItem(CHANNEL_READ_STORAGE_KEY);
+
+        if (!raw)
+        {
+            return {};
+        }
+
+        const parsed = JSON.parse(raw);
+
+        return parsed && typeof parsed === "object" ? parsed : {};
+    }
+    catch (err)
+    {
+        console.warn("Could not load channel read state:", err);
+        return {};
+    }
+}
+
+function saveChannelReadState(readState)
+{
+    try
+    {
+        localStorage.setItem(CHANNEL_READ_STORAGE_KEY, JSON.stringify(readState));
+    }
+    catch (err)
+    {
+        console.warn("Could not save channel read state:", err);
+    }
+}
+
+function getChannelReadKey(channel)
+{
+    return String(channel.key_hex || "").toUpperCase();
+}
+
+function getChannelLastReadEpoch(channel)
+{
+    const readState = loadChannelReadState();
+    const key = getChannelReadKey(channel);
+
+    return Number(readState[key] || 0);
+}
+
+function markChannelAsRead(channel)
+{
+    const key = getChannelReadKey(channel);
+
+    if (key === "")
+    {
+        return;
+    }
+
+    const newestMessageEpoch = Number(channel.newest_message_epoch || 0);
+
+    if (!Number.isFinite(newestMessageEpoch) || newestMessageEpoch <= 0)
+    {
+        return;
+    }
+
+    const readState = loadChannelReadState();
+
+    readState[key] = Math.max(
+        Number(readState[key] || 0),
+        newestMessageEpoch
+    );
+
+    saveChannelReadState(readState);
+}
+
 function renderChannelsList()
 {
     const listEl = document.getElementById("channelsList");
@@ -3862,6 +4151,14 @@ function renderChannelsList()
         const btn = document.createElement("button");
         btn.type = "button";
         btn.className = "channel-item";
+
+        const newestMessageEpoch = Number(channel.newest_message_epoch || 0);
+        const lastReadEpoch = getChannelLastReadEpoch(channel);
+
+        if (newestMessageEpoch > lastReadEpoch)
+        {
+            btn.classList.add("channel-has-unread");
+        }
 
         const channelIdx = Number(channel.channel_idx || 0);
         const channelName =
@@ -3934,8 +4231,11 @@ function renderChannelsList()
                 enabled: !!channel.enabled,
                 is_observed: !!channel.is_observed,
                 has_local_context: !!channel.has_local_context,
-                is_default: !!channel.is_default
+                is_default: !!channel.is_default,
+                newest_message_epoch: newestMessageEpoch
             };
+
+            markChannelAsRead(state.chatRow);
 
             setLeftTab("channels");
             showChatForRow(state.chatRow);
@@ -4109,7 +4409,9 @@ table = new Tabulator("#nodesTable",
 
                 if (isChatLikeNode(row))
                 {
+                    markContactAsRead(row);
                     showChatForRow(row);
+                    table.redraw(true);
                 }
                 else if (isRepeaterNode(row))
                 {
@@ -5145,6 +5447,26 @@ el.tabPathMapViewBtn?.addEventListener("click", function()
     activateChatTab("pathmap");
 });
 
+el.mapPathToggleNames?.addEventListener("change", function()
+{
+    state.chatPathShowNames = !!el.mapPathToggleNames.checked;
+
+    if (state.lastNodeAdvertPathRow)
+    {
+        showNodeAdvertPath(state.lastNodeAdvertPathRow);
+    }
+});
+
+el.mapPathToggleDistances?.addEventListener("change", function()
+{
+    state.chatPathShowDistances = !!el.mapPathToggleDistances.checked;
+
+    if (state.lastNodeAdvertPathRow)
+    {
+        showNodeAdvertPath(state.lastNodeAdvertPathRow);
+    }
+});
+
 setChatInputEnabled(false);
 showEmptyRightPanel();
 
@@ -5200,5 +5522,4 @@ setInterval(async function()
         console.error("Channels refresh failed:", err);
     }
 }, 10000);
-
 

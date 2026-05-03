@@ -37,9 +37,7 @@ namespace
 
     bool IsTestCommand(const std::string& text)
     {
-        return ContainsWord(text, "ping")
-            || ContainsWord(text, "test")
-            || ContainsWord(text, "path");
+        return ContainsWord(text, "ping");
     }
 }
 

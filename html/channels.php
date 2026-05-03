@@ -38,16 +38,18 @@ try
             c.sync_action,
             c.sync_error,
             UNIX_TIMESTAMP(c.last_seen_at) AS last_seen_epoch,
-            COALESCE(cm.message_count, 0) AS message_count
+            COALESCE(cm.message_count, 0) AS message_count,
+            cm.newest_message_epoch
         FROM channels c
         LEFT JOIN
         (
             SELECT
                 channel_key_hex,
-                COUNT(*) AS message_count
+                COUNT(*) AS message_count,
+                MAX(timestamp_epoch) AS newest_message_epoch
             FROM chat_messages
             WHERE chat_kind = 2
-              AND channel_key_hex IS NOT NULL
+            AND channel_key_hex IS NOT NULL
             GROUP BY channel_key_hex
         ) cm
             ON cm.channel_key_hex = c.key_hex
@@ -79,6 +81,9 @@ try
             'sync_error' => (string) $row['sync_error'],
             'last_seen_epoch' => $row['last_seen_epoch'] !== null ? (int) $row['last_seen_epoch'] : null,
             'message_count' => isset($row['message_count']) ? (int) $row['message_count'] : 0,
+            'newest_message_epoch' => $row['newest_message_epoch'] !== null
+                ? (int) $row['newest_message_epoch']
+                : null,
         ];
     }
 

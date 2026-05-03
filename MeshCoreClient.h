@@ -93,7 +93,16 @@ public:
         uint32_t rxAirSecs = 0;
     };
 
+    struct CoreStats
+    {
+        uint16_t batteryMv = 0;
+        uint32_t uptimeSecs = 0;
+        uint16_t errors = 0;
+        uint8_t queueLen = 0;
+    };
+
     std::optional<RadioStats> getRadioStats();
+    std::optional<CoreStats> getCoreStats();
 
     std::optional<std::vector<DiscoverResult>> discoverRepeaters(
         int ackTimeoutMs = 3000,

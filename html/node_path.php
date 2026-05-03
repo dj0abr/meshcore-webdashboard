@@ -172,6 +172,7 @@ try
 
     $stmtNode->close();
 
+    /* nur Repeater ! */
     $sqlNodes = "
         SELECT
             prefix6_hex,
@@ -180,7 +181,8 @@ try
             adv_lon_e6
         FROM nodes
         WHERE prefix6_hex IS NOT NULL
-          AND LOWER(prefix6_hex) LIKE ?
+        AND LOWER(prefix6_hex) LIKE ?
+        AND advert_type = 2
         ORDER BY name ASC, prefix6_hex ASC
     ";
 

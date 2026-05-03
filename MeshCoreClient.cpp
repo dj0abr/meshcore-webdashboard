@@ -2048,6 +2048,7 @@ std::optional<MeshCoreClient::RadioStats> MeshCoreClient::getRadioStats()
 
     if (frame[0] != MeshCoreProto::RESP_CODE_STATS_RADIO || frame[1] != 0x01)
     {
+        
         std::cerr << "[radio_status] unexpected response: code=0x"
                 << std::hex << static_cast<int>(frame[0])
                 << " sub=0x"
@@ -2063,6 +2064,69 @@ std::optional<MeshCoreClient::RadioStats> MeshCoreClient::getRadioStats()
     stats.lastSnr = static_cast<float>(static_cast<int8_t>(frame[5])) / 4.0f;
     stats.txAirSecs = le32(frame.data() + 6);
     stats.rxAirSecs = le32(frame.data() + 10);
+
+    return stats;
+}
+
+std::optional<MeshCoreClient::CoreStats> MeshCoreClient::getCoreStats()
+{
+    if (!isConnected())
+    {
+        return std::nullopt;
+    }
+
+    std::vector<uint8_t> cmd;
+    cmd.reserve(2);
+    cmd.push_back(MeshCoreProto::CMD_GET_STATS_RADIO);
+    cmd.push_back(0x00);
+
+    std::optional<std::vector<uint8_t>> resp;
+
+    {
+        std::lock_guard<std::mutex> apiLock(m_apiMutex);
+        resp = m_link.requestResponseAny(
+            cmd,
+            std::vector<uint8_t>
+            {
+                MeshCoreProto::RESP_CODE_STATS_RADIO
+            },
+            3000
+        );
+    }
+
+    if (!resp.has_value())
+    {
+        std::cerr << "[radio_status] no response for stats_core command\n";
+        return std::nullopt;
+    }
+
+    if (resp->size() < 11)
+    {
+        std::cerr << "[radio_status] stats_core response too short, size="
+                  << resp->size()
+                  << "\n";
+
+        return std::nullopt;
+    }
+
+    const std::vector<uint8_t>& frame = *resp;
+
+    if (frame[0] != MeshCoreProto::RESP_CODE_STATS_RADIO || frame[1] != 0x00)
+    {
+        std::cerr << "[radio_status] unexpected stats_core response: code=0x"
+                  << std::hex << static_cast<int>(frame[0])
+                  << " sub=0x"
+                  << static_cast<int>(frame[1])
+                  << std::dec << "\n";
+
+        return std::nullopt;
+    }
+
+    CoreStats stats {};
+    stats.batteryMv = static_cast<uint16_t>(frame[2] | (frame[3] << 8));
+    stats.uptimeSecs = le32(frame.data() + 4);
+    stats.errors = static_cast<uint16_t>(frame[8] | (frame[9] << 8));
+    stats.queueLen = frame[10];
 
     return stats;
 }
