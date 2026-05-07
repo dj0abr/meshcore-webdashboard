@@ -38,6 +38,7 @@ namespace MeshCoreProto
     static constexpr uint8_t CMD_SEND_CONTROL_DATA = 0x37;
     static constexpr uint8_t CMD_GET_STATS_RADIO   = 0x38;
     static constexpr uint8_t CONTROL_OP_DISCOVER = 0x81;
+    static constexpr uint8_t CMD_SET_PATH_HASH_MODE = 0x3D;
 
     // Responses
     static constexpr uint8_t RESP_CODE_OK                  = 0;

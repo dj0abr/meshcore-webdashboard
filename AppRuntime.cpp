@@ -146,6 +146,11 @@ AppRuntime::AppRuntime(MeshCoreClient& client)
     , m_syncContactsAt()
     , m_nextChannelSyncPollAt(std::chrono::steady_clock::now())
     , m_nextRadioStatusPollAt(std::chrono::steady_clock::now()) 
+    , m_pruneRepeatersAfterSync(false)
+    , m_repeaterPruneQueue()
+    , m_nextRepeaterPruneAt(std::chrono::steady_clock::now())
+    , m_resyncNodesAfterRepeaterPrune(false)
+    , m_nextHourlyNodesResyncAt(std::chrono::steady_clock::now() + std::chrono::hours(1))
 {
 }
 
@@ -185,6 +190,9 @@ void AppRuntime::StartupSync()
     MeshDB::ClearNodesTable();
     MeshDB::ClearChannelsTable();
     MeshDB::ClearTxBoxTable();
+
+    m_pruneRepeatersAfterSync = true;
+
     SyncContacts();
     SyncChannels();
 }
@@ -201,6 +209,9 @@ void AppRuntime::Tick()
         ProcessPendingChannelSync();
         m_nextChannelSyncPollAt = std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
     }
+
+    ProcessRepeaterContactPrune();
+    ProcessHourlyNodesResync();
     
     PollRadioStatus();
     ProcessCompanionActions();
@@ -338,6 +349,134 @@ void AppRuntime::SyncContacts()
 
         DataConnector::Emit(adv);
     }
+
+    if (m_pruneRepeatersAfterSync)
+    {
+        m_pruneRepeatersAfterSync = false;
+        QueueRepeaterContactPrune(*peers, keep);
+    }
+}
+
+void AppRuntime::QueueRepeaterContactPrune(
+    const std::vector<MeshCoreClient::Peer>& peers,
+    const std::vector<bool>& keep)
+{
+    m_repeaterPruneQueue.clear();
+
+    for (size_t i = 0; i < peers.size(); i++)
+    {
+        if (!keep[i])
+        {
+            continue;
+        }
+
+        const auto& p = peers[i];
+
+        if (p.type != static_cast<uint8_t>(DataConnector::AdvertType::REPEATER))
+        {
+            continue;
+        }
+
+        m_repeaterPruneQueue.push_back(p.publicKey);
+    }
+
+    m_nextRepeaterPruneAt = std::chrono::steady_clock::now();
+
+    std::cout << "[SYNC] queued repeater contacts for companion prune: "
+              << m_repeaterPruneQueue.size()
+              << "\n";
+
+    if (!m_repeaterPruneQueue.empty())
+    {
+        m_resyncNodesAfterRepeaterPrune = true;
+    }
+}
+
+void AppRuntime::RebuildNodesFromCompanion(bool pruneRepeaters)
+{
+    MeshDB::ClearNodesTable();
+
+    const bool oldPruneFlag = m_pruneRepeatersAfterSync;
+    m_pruneRepeatersAfterSync = pruneRepeaters;
+
+    SyncContacts();
+
+    m_pruneRepeatersAfterSync = oldPruneFlag;
+}
+
+void AppRuntime::ResyncNodesFromCompanionAfterPrune()
+{
+    std::cout << "[SYNC] repeater prune finished, rebuilding nodes from companion\n";
+
+    RebuildNodesFromCompanion(false);
+
+    std::cout << "[SYNC] nodes rebuild after repeater prune finished\n";
+}
+
+void AppRuntime::ProcessHourlyNodesResync()
+{
+    const auto now = std::chrono::steady_clock::now();
+
+    if (now < m_nextHourlyNodesResyncAt)
+    {
+        return;
+    }
+
+    m_nextHourlyNodesResyncAt = now + std::chrono::hours(1);
+
+    if (!m_repeaterPruneQueue.empty())
+    {
+        return;
+    }
+
+    std::cout << "[SYNC] hourly nodes resync started\n";
+
+    RebuildNodesFromCompanion(true);
+
+    std::cout << "[SYNC] hourly nodes resync finished\n";
+}
+
+void AppRuntime::ProcessRepeaterContactPrune()
+{
+    if (m_repeaterPruneQueue.empty())
+    {
+        return;
+    }
+
+    const auto now = std::chrono::steady_clock::now();
+
+    if (now < m_nextRepeaterPruneAt)
+    {
+        return;
+    }
+
+    const auto publicKey = m_repeaterPruneQueue.back();
+    m_repeaterPruneQueue.pop_back();
+
+    std::cout << "[SYNC] pruning repeater contact from companion, remaining="
+              << m_repeaterPruneQueue.size()
+              << "\n";
+
+    if (!m_client.removeContact(publicKey))
+    {
+        std::cout << "[SYNC] removeContact failed while pruning repeater\n";
+    }
+
+    if (m_repeaterPruneQueue.empty())
+    {
+        std::cout << "[SYNC] repeater contact prune finished\n";
+
+        if (m_resyncNodesAfterRepeaterPrune)
+        {
+            m_resyncNodesAfterRepeaterPrune = false;
+            ResyncNodesFromCompanionAfterPrune();
+        }
+
+        return;
+    }
+
+    m_nextRepeaterPruneAt =
+        std::chrono::steady_clock::now() + std::chrono::milliseconds(250);
 }
 
 void AppRuntime::SyncChannels()
@@ -959,6 +1098,12 @@ bool AppRuntime::ApplyCompanionConfig(const MeshDB::CompanionConfig& cfg)
         return false;
     }
 
+    if (!m_client.setPathHashMode(1)) // 1 ... 2-Byte Hash
+    {
+        MeshDB::MarkCompanionConfigApplyFailed("setPathHashMode failed");
+        return false;
+    }
+
     if (!m_client.setRadioTxPower(22))
     {
         MeshDB::MarkCompanionConfigApplyFailed("setRadioTxPower failed");
@@ -1017,14 +1162,14 @@ void AppRuntime::ProcessDiscoverQueue()
             << job.id
             << "\n";
     }
-
+/*
     std::cout
         << "[discover] latest queued job found: id="
         << job.id
         << " type_filter=" << unsigned(job.typeFilter)
         << " requested_by=" << job.requestedBy
         << "\n";
-
+*/
     if (!ProcessSingleDiscoverJob(job))
     {
         std::cout
@@ -1055,7 +1200,7 @@ bool AppRuntime::ProcessSingleDiscoverJob(const MeshDB::DiscoverJob& job)
             << " as running\n";
         return false;
     }
-
+/*
     std::cout
         << "[discover] starting job id="
         << job.id
@@ -1063,7 +1208,7 @@ bool AppRuntime::ProcessSingleDiscoverJob(const MeshDB::DiscoverJob& job)
         << std::dec
         << " request_tag=" << requestTag
         << "\n";
-
+*/
     std::optional<std::vector<MeshCoreClient::DiscoverResult>> results;
 
     switch (job.typeFilter)
@@ -1141,14 +1286,14 @@ bool AppRuntime::ProcessSingleDiscoverJob(const MeshDB::DiscoverJob& job)
             << " as done\n";
         return false;
     }
-
+/*
     std::cout
         << "[discover] job "
         << job.id
         << " done, "
         << results->size()
         << " result(s)\n";
-
+*/
     return true;
 }
 

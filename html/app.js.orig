@@ -2,49 +2,6 @@ let table = null;
 
 const CONTACT_READ_STORAGE_KEY = "meshcore.contactLastReadEpoch";
 const PATH_DISPLAY_SETTINGS_STORAGE_KEY = "meshcore.pathDisplaySettings";
-const NOTIFICATION_AUDIO_ENABLED_STORAGE_KEY = "meshcore.notificationAudioEnabled";
-
-function loadNotificationAudioEnabled()
-{
-    try
-    {
-        const raw = localStorage.getItem(NOTIFICATION_AUDIO_ENABLED_STORAGE_KEY);
-
-        if (raw === null)
-        {
-            return true;
-        }
-
-        return raw === "1";
-    }
-    catch (err)
-    {
-        return true;
-    }
-}
-
-function saveNotificationAudioEnabled()
-{
-    try
-    {
-        localStorage.setItem(
-            NOTIFICATION_AUDIO_ENABLED_STORAGE_KEY,
-            state.notificationAudioEnabled ? "1" : "0"
-        );
-    }
-    catch (err)
-    {
-        // localStorage may be disabled/private. Ignore and keep current session state.
-    }
-}
-
-function syncNotificationAudioCheckbox()
-{
-    if (el.notificationAudioToggle)
-    {
-        el.notificationAudioToggle.checked = state.notificationAudioEnabled;
-    }
-}
 
 function loadPathDisplaySettings()
 {
@@ -147,7 +104,6 @@ const el =
     chatTabsView: document.getElementById("chatTabsView"),
     tabMessagesViewBtn: document.getElementById("tabMessagesViewBtn"),
     tabPathMapViewBtn: document.getElementById("tabPathMapViewBtn"),
-    notificationAudioToggle: document.getElementById("notificationAudioToggle"),
     messagesTabView: document.getElementById("messagesTabView"),
     pathMapTabView: document.getElementById("pathMapTabView"),
     allMapButton: document.getElementById("allMapButton"),
@@ -243,11 +199,6 @@ const state =
     chatRefreshTimer: null,
     chatLastMessageId: 0,
     chatMessages: [],
-    incomingMessagePollTimer: null,
-    incomingMessageLastId: 0,
-    incomingMessagePollActive: false,
-    incomingMessageDetectionReady: false,
-    lastIncomingMessageId: 0,
     txPollTimers: new Map(),
     roomPasswordPrompt: null,
     openRoomPasswordNodeIds: new Set(),
@@ -264,7 +215,6 @@ const state =
     mapContextRow: null,
     resetPathPending: false,
     noiseFloorRefreshTimer: null,
-    notificationAudioEnabled: loadNotificationAudioEnabled(),
 };
 
 const icons =
@@ -4021,185 +3971,6 @@ async function loadChatMessages(row, keepScrollIfPossible = true)
     });
 }
 
-
-function getIncomingMessageChatLabel(msg)
-{
-    const chatKind = Number(msg.chat_kind || 0);
-
-    if (chatKind === 2)
-    {
-        if (msg.channel_key_hex)
-        {
-            const channel = state.channels.find(function(item)
-            {
-                return String(item.key_hex || "").toUpperCase() === String(msg.channel_key_hex || "").toUpperCase();
-            });
-
-            if (channel && channel.name)
-            {
-                return `Channel ${channel.name}`;
-            }
-        }
-
-        return msg.name ? `Channel ${msg.name}` : "Channel";
-    }
-
-    if (chatKind === 1)
-    {
-        return `Room ${msg.name || "?"}`;
-    }
-
-    return `DM ${msg.name || "?"}`;
-}
-
-async function pollIncomingMessages()
-{
-    if (state.incomingMessagePollActive)
-    {
-        return;
-    }
-
-    state.incomingMessagePollActive = true;
-
-    try
-    {
-        const response = await fetch(`new_messages.php?after_id=${encodeURIComponent(state.lastIncomingMessageId)}`, {
-            cache: "no-store",
-        });
-
-        const data = await response.json();
-
-        if (!data.success)
-        {
-            throw new Error(data.error || "new_messages.php failed");
-        }
-
-        const messages = Array.isArray(data.messages) ? data.messages : [];
-
-        if (!state.incomingMessageDetectionReady)
-        {
-            state.lastIncomingMessageId = Number(data.newest_id || 0);
-            state.incomingMessageDetectionReady = true;
-            return;
-        }
-
-        if (messages.length > 0)
-        {
-            console.info("Neue MeshCore RX-Message");
-            playNotificationBeep();
-        }
-
-        state.lastIncomingMessageId = Number(data.newest_id || state.lastIncomingMessageId);
-    }
-    catch (error)
-    {
-        console.warn("Incoming message detection failed", error);
-    }
-    finally
-    {
-        state.incomingMessagePollActive = false;
-    }
-}
-
-async function playBeepTone(ctx, frequency, duration, volume)
-{
-    const oscillator = ctx.createOscillator();
-    const gainNode = ctx.createGain();
-
-    const now = ctx.currentTime;
-
-    oscillator.type = "sine";
-    oscillator.frequency.setValueAtTime(frequency, now);
-
-    gainNode.gain.setValueAtTime(0.0001, now);
-    gainNode.gain.exponentialRampToValueAtTime(volume, now + 0.01);
-    gainNode.gain.exponentialRampToValueAtTime(0.0001, now + duration);
-
-    oscillator.connect(gainNode);
-    gainNode.connect(ctx.destination);
-
-    oscillator.start(now);
-    oscillator.stop(now + duration + 0.03);
-
-    await new Promise(function(resolve)
-    {
-        oscillator.addEventListener("ended", resolve, { once: true });
-    });
-
-    oscillator.disconnect();
-    gainNode.disconnect();
-}
-
-function delay(ms)
-{
-    return new Promise(function(resolve)
-    {
-        setTimeout(resolve, ms);
-    });
-}
-
-async function playNotificationBeep()
-{
-    try
-    {
-        if (!state.notificationAudioEnabled)
-        {
-            return;
-        }
-
-        if (notificationAudioContext === null)
-        {
-            notificationAudioContext = new (
-                window.AudioContext ||
-                window.webkitAudioContext
-            )();
-        }
-
-        const ctx = notificationAudioContext;
-
-        if (ctx.state === "suspended")
-        {
-            await ctx.resume();
-            await delay(50);
-        }
-
-        if (ctx.state !== "running")
-        {
-            console.warn("Beep skipped, AudioContext state:", ctx.state);
-            return;
-        }
-
-        await playBeepTone(ctx, 600, 0.18, 0.35);
-        await delay(100);
-        await playBeepTone(ctx, 900, 0.28, 0.7);
-    }
-    catch (error)
-    {
-        console.warn("Beep failed", error);
-    }
-}
-
-function startIncomingMessageDetection()
-{
-    if (state.incomingMessagePollTimer)
-    {
-        return;
-    }
-
-    pollIncomingMessages().catch(function(error)
-    {
-        console.error("Initiale RX-Message-Erkennung fehlgeschlagen:", error);
-    });
-
-    state.incomingMessagePollTimer = setInterval(function()
-    {
-        pollIncomingMessages().catch(function(error)
-        {
-            console.error("RX-Message-Erkennung fehlgeschlagen:", error);
-        });
-    }, 1000);
-}
-
 function startCurrentChatRefresh()
 {
     stopCurrentChatRefresh();
@@ -6301,51 +6072,7 @@ showEmptyRightPanel();
     }
 })();
 
-syncNotificationAudioCheckbox();
-
-el.notificationAudioToggle?.addEventListener("change", function()
-{
-    state.notificationAudioEnabled = !!el.notificationAudioToggle.checked;
-    saveNotificationAudioEnabled();
-});
-
-let notificationAudioContext = null;
-
-async function unlockNotificationAudio()
-{
-    try
-    {
-        if (notificationAudioContext === null)
-        {
-            notificationAudioContext = new (
-                window.AudioContext ||
-                window.webkitAudioContext
-            )();
-        }
-
-        if (notificationAudioContext.state === "suspended")
-        {
-            await notificationAudioContext.resume();
-            await delay(50);
-        }
-
-        if (notificationAudioContext.state === "running")
-        {
-            await playBeepTone(notificationAudioContext, 300, 0.05, 0.02);
-        }
-    }
-    catch (error)
-    {
-        console.warn("Notification audio unlock failed", error);
-    }
-}
-
-document.addEventListener("click", unlockNotificationAudio);
-document.addEventListener("keydown", unlockNotificationAudio);
-document.addEventListener("touchstart", unlockNotificationAudio);
-
 refreshNoiseFloor();
-startIncomingMessageDetection();
 
 state.noiseFloorRefreshTimer = setInterval(function()
 {

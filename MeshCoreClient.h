@@ -144,6 +144,7 @@ public:
 
     bool resetPath(const std::array<uint8_t, 32>& publicKey);
     bool removeContact(const std::array<uint8_t, 32>& publicKey);
+    bool setPathHashMode(uint8_t mode);
 
     // Messaging
     struct TxQueued

@@ -93,7 +93,22 @@ function jobStatusText(int $status): string
                 r.source_code,
                 r.updated_at
             FROM discover_results r
-            LEFT JOIN nodes n
+            LEFT JOIN
+            (
+                SELECT n0.public_key_hex, n0.name
+                FROM nodes n0
+                WHERE n0.public_key_hex IS NOT NULL
+                AND NOT EXISTS
+                (
+                    SELECT 1
+                    FROM repeaternodes r0
+                    WHERE r0.public_key_hex IS NOT NULL
+                    AND LOWER(r0.public_key_hex) = LOWER(n0.public_key_hex)
+                )
+                UNION ALL
+                SELECT public_key_hex, name FROM repeaternodes
+                WHERE public_key_hex IS NOT NULL
+            ) n
                 ON LEFT(n.public_key_hex, 16) = r.node_id_hex
             WHERE r.last_job_id = {$jobId}
             ORDER BY r.rssi_dbm DESC, r.node_id_hex ASC

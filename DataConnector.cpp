@@ -438,7 +438,7 @@ void DataConnector::Emit(const AdvertInfo& info)
 {
     const std::string line = FormatAdvert(info);
 //printf("Adv: %s\n",line.c_str())    ;
-    MeshDB::StoreAdvert(info, line);
+    MeshDB::StoreAdvert(info);
     EmitFormatted(GetEventType(info), line);
 }
 
@@ -491,7 +491,7 @@ void DataConnector::Emit(const PushTraceInfo& info)
 void DataConnector::Emit(const PushNewAdvertInfo& info)
 {
     const std::string line = FormatPush(info);
-    MeshDB::StorePushNewAdvert(info, line);
+    MeshDB::StorePushNewAdvert(info);
     EmitFormatted(GetEventType(info), line);
 }
 

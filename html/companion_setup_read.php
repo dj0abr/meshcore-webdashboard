@@ -28,6 +28,7 @@ try
     $sql = "
         SELECT
             name,
+            location_name,
             latitude_e6,
             longitude_e6,
             apply_pending,
@@ -61,6 +62,7 @@ try
             'config' =>
             [
                 'name' => (string) $row['name'],
+                'location_name' => $row['location_name'] !== null ? (string) $row['location_name'] : '',
                 'latitude' => $latitude,
                 'longitude' => $longitude,
                 'apply_pending' => ((int) $row['apply_pending'] === 1),

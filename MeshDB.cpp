@@ -402,6 +402,31 @@ bool MeshDB::EnsureSchema()
         "    KEY idx_nodes_last_advert_at (last_advert_at)"
         ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4";
 
+    const char* sqlRepeaterNodes =
+        "CREATE TABLE IF NOT EXISTS repeaternodes ("
+        "    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,"
+        "    node_id INT UNSIGNED DEFAULT NULL,"
+        "    advert_type TINYINT UNSIGNED NOT NULL DEFAULT 0,"
+        "    advert_flags TINYINT UNSIGNED NOT NULL DEFAULT 0,"
+        "    name VARCHAR(64) NOT NULL DEFAULT '',"
+        "    name_key VARCHAR(64) GENERATED ALWAYS AS (NULLIF(TRIM(name), '')) PERSISTENT,"
+        "    public_key_hex CHAR(64) DEFAULT NULL,"
+        "    prefix6_hex CHAR(12) DEFAULT NULL,"
+        "    adv_lat_e6 INT DEFAULT NULL,"
+        "    adv_lon_e6 INT DEFAULT NULL,"
+        "    last_advert_at DATETIME DEFAULT NULL,"
+        "    last_mod_at DATETIME DEFAULT NULL,"
+        "    first_seen_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,"
+        "    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,"
+        "    PRIMARY KEY (id),"
+        "    UNIQUE KEY uq_repeaternodes_node_id (node_id),"
+        "    UNIQUE KEY uq_repeaternodes_public_key_hex (public_key_hex),"
+        "    UNIQUE KEY uq_repeaternodes_prefix6_hex (prefix6_hex),"
+        "    UNIQUE KEY uq_repeaternodes_name_key (name_key),"
+        "    KEY idx_repeaternodes_name (name),"
+        "    KEY idx_repeaternodes_last_advert_at (last_advert_at)"
+        ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4";
+
         const char* sqlNodeAdvertPaths =
             "CREATE TABLE IF NOT EXISTS node_advert_paths ("
             "    public_key_hex CHAR(64) NOT NULL,"
@@ -526,6 +551,7 @@ bool MeshDB::EnsureSchema()
             "    name VARCHAR(64) NOT NULL,"
             "    latitude_e6 INT NOT NULL,"
             "    longitude_e6 INT NOT NULL,"
+            "    location_name VARCHAR(128) DEFAULT NULL,"
             "    radio_bw_hz INT UNSIGNED NOT NULL,"
             "    radio_sf TINYINT UNSIGNED NOT NULL,"
             "    radio_cr TINYINT UNSIGNED NOT NULL,"
@@ -638,6 +664,7 @@ bool MeshDB::EnsureSchema()
         "    PRIMARY KEY (id)"
         ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4";
     return Execute(sqlNodes)
+        && Execute(sqlRepeaterNodes)
         && Execute(sqlTxOutbox)
         && Execute(sqlNodeAdvertPaths)
         && Execute(sqlRoomCredentials)
@@ -781,6 +808,57 @@ bool MeshDB::UpsertNodeFromAdvert(const DataConnector::AdvertInfo& info)
     return Execute(oss.str());
 }
 
+bool MeshDB::UpsertRepeaterNodeFromAdvert(const DataConnector::AdvertInfo& info)
+{
+    const std::string publicKeyHex =
+        DataConnector::hexBytes(info.publicKey.data(), info.publicKey.size());
+
+    const std::string prefix6Hex =
+        DataConnector::hexBytes(info.publicKey.data(), 6);
+
+    const bool hasLocation = (info.advLatE6 != 0) || (info.advLonE6 != 0);
+    const std::time_t lastAdvert = info.lastAdvert;
+
+    std::ostringstream oss;
+
+    oss
+        << "INSERT INTO repeaternodes ("
+        << "node_id, advert_type, advert_flags, name, public_key_hex, prefix6_hex, last_advert_at, first_seen_at, adv_lat_e6, adv_lon_e6"
+        << ") VALUES ("
+        << info.nodeId << ", "
+        << unsigned(info.type) << ", "
+        << unsigned(info.flags) << ", "
+        << ToSqlString(info.name) << ", "
+        << ToSqlString(publicKeyHex) << ", "
+        << ToSqlString(prefix6Hex) << ", "
+        << ToSqlDateTime(lastAdvert) << ", "
+        << "COALESCE(" << ToSqlDateTime(lastAdvert) << ", CURRENT_TIMESTAMP), ";
+
+    if (hasLocation)
+    {
+        oss << info.advLatE6 << ", " << info.advLonE6;
+    }
+    else
+    {
+        oss << "NULL, NULL";
+    }
+
+    oss
+        << ") ON DUPLICATE KEY UPDATE "
+        << "node_id=IF(VALUES(last_advert_at) >= COALESCE(last_advert_at, '1970-01-01 00:00:00'), VALUES(node_id), node_id), "
+        << "advert_type=IF(VALUES(last_advert_at) >= COALESCE(last_advert_at, '1970-01-01 00:00:00'), VALUES(advert_type), advert_type), "
+        << "advert_flags=IF(VALUES(last_advert_at) >= COALESCE(last_advert_at, '1970-01-01 00:00:00'), VALUES(advert_flags), advert_flags), "
+        << "name=IF(VALUES(name) <> '', VALUES(name), name), "
+        << "public_key_hex=IF(VALUES(last_advert_at) >= COALESCE(last_advert_at, '1970-01-01 00:00:00'), VALUES(public_key_hex), public_key_hex), "
+        << "prefix6_hex=IF(VALUES(last_advert_at) >= COALESCE(last_advert_at, '1970-01-01 00:00:00'), VALUES(prefix6_hex), prefix6_hex), "
+        << "last_advert_at=IF(VALUES(last_advert_at) >= COALESCE(last_advert_at, '1970-01-01 00:00:00'), VALUES(last_advert_at), last_advert_at), "
+        << "adv_lat_e6=IF(VALUES(last_advert_at) >= COALESCE(last_advert_at, '1970-01-01 00:00:00'), COALESCE(VALUES(adv_lat_e6), adv_lat_e6), adv_lat_e6), "
+        << "adv_lon_e6=IF(VALUES(last_advert_at) >= COALESCE(last_advert_at, '1970-01-01 00:00:00'), COALESCE(VALUES(adv_lon_e6), adv_lon_e6), adv_lon_e6), "
+        << "updated_at=CURRENT_TIMESTAMP";
+
+    return Execute(oss.str());
+}
+
 bool MeshDB::UpsertNodeFromPushAdvert(const DataConnector::PushAdvertInfo& info)
 {
     if (!info.valid)
@@ -861,6 +939,63 @@ bool MeshDB::UpsertNodeFromPushNewAdvert(const DataConnector::PushNewAdvertInfo&
     return Execute(oss.str());
 }
 
+bool MeshDB::UpsertRepeaterNodeFromPushNewAdvert(const DataConnector::PushNewAdvertInfo& info)
+{
+    if (!info.valid)
+    {
+        return true;
+    }
+
+    const std::string publicKeyHex =
+        DataConnector::hexBytes(info.publicKey.data(), info.publicKey.size());
+
+    const std::string prefix6Hex =
+        DataConnector::hexBytes(info.prefix6.data(), info.prefix6.size());
+
+    const bool hasLocation = (info.advLatE6 != 0) || (info.advLonE6 != 0);
+
+    std::ostringstream oss;
+
+    oss
+        << "INSERT INTO repeaternodes ("
+        << "node_id, advert_type, advert_flags, name, public_key_hex, prefix6_hex, last_advert_at, last_mod_at, first_seen_at, adv_lat_e6, adv_lon_e6"
+        << ") VALUES ("
+        << info.nodeId << ", "
+        << unsigned(info.type) << ", "
+        << unsigned(info.flags) << ", "
+        << ToSqlString(info.name) << ", "
+        << ToSqlString(publicKeyHex) << ", "
+        << ToSqlString(prefix6Hex) << ", "
+        << ToSqlDateTimeFromU32(info.lastAdvert) << ", "
+        << ToSqlDateTimeFromU32(info.lastMod) << ", "
+        << "COALESCE(" << ToSqlDateTimeFromU32(info.lastAdvert) << ", CURRENT_TIMESTAMP), ";
+
+    if (hasLocation)
+    {
+        oss << info.advLatE6 << ", " << info.advLonE6;
+    }
+    else
+    {
+        oss << "NULL, NULL";
+    }
+
+    oss
+        << ") ON DUPLICATE KEY UPDATE "
+        << "node_id=IF(VALUES(last_advert_at) >= COALESCE(last_advert_at, '1970-01-01 00:00:00'), VALUES(node_id), node_id), "
+        << "advert_type=IF(VALUES(last_advert_at) >= COALESCE(last_advert_at, '1970-01-01 00:00:00'), VALUES(advert_type), advert_type), "
+        << "advert_flags=IF(VALUES(last_advert_at) >= COALESCE(last_advert_at, '1970-01-01 00:00:00'), VALUES(advert_flags), advert_flags), "
+        << "name=IF(VALUES(name) <> '', VALUES(name), name), "
+        << "public_key_hex=IF(VALUES(last_advert_at) >= COALESCE(last_advert_at, '1970-01-01 00:00:00'), VALUES(public_key_hex), public_key_hex), "
+        << "prefix6_hex=IF(VALUES(last_advert_at) >= COALESCE(last_advert_at, '1970-01-01 00:00:00'), VALUES(prefix6_hex), prefix6_hex), "
+        << "last_advert_at=IF(VALUES(last_advert_at) >= COALESCE(last_advert_at, '1970-01-01 00:00:00'), VALUES(last_advert_at), last_advert_at), "
+        << "last_mod_at=IF(VALUES(last_mod_at) >= COALESCE(last_mod_at, '1970-01-01 00:00:00'), VALUES(last_mod_at), last_mod_at), "
+        << "adv_lat_e6=IF(VALUES(last_advert_at) >= COALESCE(last_advert_at, '1970-01-01 00:00:00'), COALESCE(VALUES(adv_lat_e6), adv_lat_e6), adv_lat_e6), "
+        << "adv_lon_e6=IF(VALUES(last_advert_at) >= COALESCE(last_advert_at, '1970-01-01 00:00:00'), COALESCE(VALUES(adv_lon_e6), adv_lon_e6), adv_lon_e6), "
+        << "updated_at=CURRENT_TIMESTAMP";
+
+    return Execute(oss.str());
+}
+
 bool MeshDB::UpsertNodeFromPathUpdated(const DataConnector::PushPathUpdatedInfo& info)
 {
     if (!info.valid)
@@ -882,7 +1017,7 @@ bool MeshDB::UpsertNodeFromPathUpdated(const DataConnector::PushPathUpdatedInfo&
     return Execute(oss.str());
 }
 
-bool MeshDB::StoreAdvert(const DataConnector::AdvertInfo& info, const std::string& summary)
+bool MeshDB::StoreAdvert(const DataConnector::AdvertInfo& info)
 {
     std::lock_guard<std::mutex> lock(s_mutex);
 
@@ -891,13 +1026,12 @@ bool MeshDB::StoreAdvert(const DataConnector::AdvertInfo& info, const std::strin
         return false;
     }
 
-    if (!UpsertNodeFromAdvert(info))
+    if (info.type == DataConnector::AdvertType::REPEATER)
     {
-        return false;
+        return UpsertRepeaterNodeFromAdvert(info);
     }
 
-    (void)summary;
-    return true;
+    return UpsertNodeFromAdvert(info);
 }
 
 bool MeshDB::MessageAlreadyStoredUnlocked(
@@ -1159,7 +1293,7 @@ bool MeshDB::StorePushPathUpdated(const DataConnector::PushPathUpdatedInfo& info
     return true;
 }
 
-bool MeshDB::StorePushNewAdvert(const DataConnector::PushNewAdvertInfo& info, const std::string& summary)
+bool MeshDB::StorePushNewAdvert(const DataConnector::PushNewAdvertInfo& info)
 {
     std::lock_guard<std::mutex> lock(s_mutex);
 
@@ -1168,17 +1302,17 @@ bool MeshDB::StorePushNewAdvert(const DataConnector::PushNewAdvertInfo& info, co
         return false;
     }
 
-    if (!UpsertNodeFromPushNewAdvert(info))
+    if (!info.valid)
     {
-        return false;
+        return true;
     }
 
-    const std::string prefix6Hex = info.valid
-        ? DataConnector::hexBytes(info.prefix6.data(), info.prefix6.size())
-        : "";
+    if (info.type == static_cast<uint8_t>(DataConnector::AdvertType::REPEATER))
+    {
+        return UpsertRepeaterNodeFromPushNewAdvert(info);
+    }
 
-    (void)summary;
-    return true;
+    return UpsertNodeFromPushNewAdvert(info);
 }
 
 bool MeshDB::StorePushUnknown(const DataConnector::PushUnknownInfo& info, const std::string& summary)
@@ -2163,49 +2297,6 @@ bool MeshDB::DeleteChannel(uint8_t channelIdx)
     return Execute(sql2.str());
 }
 
-bool MeshDB::SaveCompanionConfig(
-    const std::string& name,
-    int32_t latitudeE6,
-    int32_t longitudeE6,
-    uint32_t radioBwHz,
-    uint8_t radioSf,
-    uint8_t radioCr)
-{
-    std::lock_guard<std::mutex> lock(s_mutex);
-
-    if (!s_ready || (s_conn == nullptr))
-    {
-        return false;
-    }
-
-    std::ostringstream sql;
-    sql
-        << "INSERT INTO companion_config ("
-        << "id, name, latitude_e6, longitude_e6, radio_bw_hz, radio_sf, radio_cr, apply_pending, last_error"
-        << ") VALUES ("
-        << "1, "
-        << ToSqlString(name) << ", "
-        << latitudeE6 << ", "
-        << longitudeE6 << ", "
-        << radioBwHz << ", "
-        << unsigned(radioSf) << ", "
-        << unsigned(radioCr) << ", "
-        << "1, "
-        << "NULL"
-        << ") "
-        << "ON DUPLICATE KEY UPDATE "
-        << "name = VALUES(name), "
-        << "latitude_e6 = VALUES(latitude_e6), "
-        << "longitude_e6 = VALUES(longitude_e6), "
-        << "radio_bw_hz = VALUES(radio_bw_hz), "
-        << "radio_sf = VALUES(radio_sf), "
-        << "radio_cr = VALUES(radio_cr), "
-        << "apply_pending = 1, "
-        << "last_error = NULL";
-
-    return Execute(sql.str());
-}
-
 std::optional<MeshDB::CompanionConfig> MeshDB::LoadCompanionConfig()
 {
     std::lock_guard<std::mutex> lock(s_mutex);
@@ -2255,6 +2346,48 @@ std::optional<MeshDB::CompanionConfig> MeshDB::LoadCompanionConfig()
 
     mysql_free_result(res);
     return cfg;
+}
+
+std::string MeshDB::GetCompanionLocationName()
+{
+    std::lock_guard<std::mutex> lock(s_mutex);
+
+    if (!s_ready || (s_conn == nullptr))
+    {
+        return "";
+    }
+
+    const char* sql =
+        "SELECT location_name "
+        "FROM companion_config "
+        "WHERE id = 1 "
+        "LIMIT 1";
+
+    if (mysql_query(s_conn, sql) != 0)
+    {
+        std::cerr << "MeshDB SQL error: " << mysql_error(s_conn) << "\n";
+        return "";
+    }
+
+    MYSQL_RES* res = mysql_store_result(s_conn);
+
+    if (res == nullptr)
+    {
+        return "";
+    }
+
+    MYSQL_ROW row = mysql_fetch_row(res);
+
+    if (row == nullptr)
+    {
+        mysql_free_result(res);
+        return "";
+    }
+
+    std::string locationName = RowStr(row, 0);
+
+    mysql_free_result(res);
+    return locationName;
 }
 
 bool MeshDB::MarkCompanionConfigApplied()
@@ -3391,3 +3524,4 @@ bool MeshDB::StoreCompanionRadioConnected(bool connected)
 
     return Execute(oss.str());
 }
+

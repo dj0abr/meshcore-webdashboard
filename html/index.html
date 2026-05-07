@@ -14,6 +14,7 @@
         rel="stylesheet"
         href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
     />
+    <link rel="icon" type="image/png" href="meshcore.png">
 
     <style>
         :root
@@ -593,7 +594,9 @@
         }
         .chat-input-bar
         {
+            position: relative;
             display: flex;
+            align-items: flex-end;
             gap: 10px;
             padding: 12px 16px;
             border-top: 1px solid var(--border);
@@ -653,6 +656,82 @@
         }
 
         .chat-send-button:hover
+        {
+            background: #162033;
+            border-color: #4b5563;
+        }
+
+        .chat-symbol-button
+        {
+            width: 44px;
+            padding-left: 0;
+            padding-right: 0;
+            font-size: 20px;
+            line-height: 1;
+        }
+
+        .chat-symbol-palette
+        {
+            position: absolute;
+            right: 96px;
+            bottom: 68px;
+            display: none;
+            width: min(420px, calc(100% - 32px));
+            max-height: 340px;
+            overflow-y: auto;
+            padding: 12px;
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            background: var(--panel);
+            box-shadow: 0 18px 50px rgba(0, 0, 0, 0.45);
+            z-index: 50;
+        }
+
+        .chat-symbol-palette.visible
+        {
+            display: block;
+        }
+
+        .chat-symbol-group
+        {
+            margin-bottom: 12px;
+        }
+
+        .chat-symbol-group:last-child
+        {
+            margin-bottom: 0;
+        }
+
+        .chat-symbol-title
+        {
+            margin: 0 0 6px;
+            color: var(--muted);
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .chat-symbol-grid
+        {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(34px, 1fr));
+            gap: 6px;
+        }
+
+        .chat-symbol-item
+        {
+            min-width: 34px;
+            height: 34px;
+            padding: 0;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            background: #0b1220;
+            color: var(--text);
+            cursor: pointer;
+            font-size: 20px;
+            line-height: 1;
+        }
+
+        .chat-symbol-item:hover
         {
             background: #162033;
             border-color: #4b5563;
@@ -1665,6 +1744,11 @@
                             </label>
 
                             <label class="path-map-toggle">
+                                <input id="mapPathToggleHash" type="checkbox" checked>
+                                <span>Hash</span>
+                            </label>
+
+                            <label class="path-map-toggle">
                                 <input id="mapPathToggleDistances" type="checkbox" checked>
                                 <span>Entfernung</span>
                             </label>
@@ -1678,6 +1762,11 @@
                     <div class="chat-tabs-bar">
                         <button id="tabMessagesViewBtn" class="chat-tab-button active" type="button">Messages</button>
                         <button id="tabPathMapViewBtn" class="chat-tab-button" type="button">Path Map</button>
+
+                        <label class="path-map-toggle" title="Notification-Beep ein/ausschalten">
+                            <input id="notificationAudioToggle" type="checkbox" checked>
+                            <span>Audio</span>
+                        </label>
                     </div>
 
                     <div id="messagesTabView" class="chat-tab-panel active">
@@ -1701,7 +1790,9 @@
                                     data-i18n-placeholder="chat.input_placeholder"
                                     data-placeholder="Nachricht eingeben und Enter drücken ..."
                                 ></div>
+                                <button id="chatSymbolButton" class="chat-send-button chat-symbol-button" type="button" title="Symbol einfügen" aria-label="Symbol einfügen">☺</button>
                                 <button id="chatSendButton" class="chat-send-button" type="button" data-i18n="chat.send">Senden</button>
+                                <div id="chatSymbolPalette" class="chat-symbol-palette" aria-hidden="true"></div>
                             </div>
                         </div>
                     </div>
@@ -1717,6 +1808,11 @@
                                     <label class="path-map-toggle">
                                         <input id="chatPathToggleNames" type="checkbox" checked>
                                         <span>Namen</span>
+                                    </label>
+
+                                    <label class="path-map-toggle">
+                                        <input id="chatPathToggleHash" type="checkbox" checked>
+                                        <span>Hash</span>
                                     </label>
 
                                     <label class="path-map-toggle">
@@ -1848,6 +1944,11 @@
                 <div class="form-group">
                     <label for="setupNameInput" data-i18n="setup.name">Name</label>
                     <input id="setupNameInput" type="text" autocomplete="off">
+                </div>
+
+                <div class="form-group">
+                    <label for="setupCityInput" data-i18n="setup.city">City</label>
+                    <input id="setupCityInput" type="text" autocomplete="off" maxlength="128">
                 </div>
 
                 <div class="form-group">

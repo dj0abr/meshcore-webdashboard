@@ -5,6 +5,7 @@
 #include "RoomAuthManager.h"
 
 #include <chrono>
+#include <vector>
 #include <cstdint>
 #include <mutex>
 #include <optional>
@@ -97,4 +98,21 @@ private:
     bool ApplyPendingChannelDelete(const MeshDB::ChannelRecord& rec);
     std::chrono::steady_clock::time_point m_nextChannelSyncPollAt;
     std::chrono::steady_clock::time_point m_nextRadioStatusPollAt;
+
+    void QueueRepeaterContactPrune(
+        const std::vector<MeshCoreClient::Peer>& peers,
+        const std::vector<bool>& keep);
+
+    void ProcessRepeaterContactPrune();
+
+    bool m_pruneRepeatersAfterSync;
+    std::vector<std::array<uint8_t, 32>> m_repeaterPruneQueue;
+    std::chrono::steady_clock::time_point m_nextRepeaterPruneAt;
+
+    void ResyncNodesFromCompanionAfterPrune();
+    bool m_resyncNodesAfterRepeaterPrune;
+
+    void RebuildNodesFromCompanion(bool pruneRepeaters);
+    void ProcessHourlyNodesResync();
+    std::chrono::steady_clock::time_point m_nextHourlyNodesResyncAt;
 };

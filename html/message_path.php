@@ -158,10 +158,10 @@ try
             name,
             adv_lat_e6,
             adv_lon_e6
-        FROM nodes
-        WHERE prefix6_hex IS NOT NULL
-          AND LOWER(prefix6_hex) LIKE ?
-          AND advert_type = 2
+        FROM repeaternodes
+        WHERE public_key_hex IS NOT NULL
+        AND prefix6_hex IS NOT NULL
+        AND LOWER(prefix6_hex) LIKE ?
         ORDER BY name ASC, prefix6_hex ASC
     ";
 

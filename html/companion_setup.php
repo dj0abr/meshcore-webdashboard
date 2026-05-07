@@ -24,6 +24,7 @@ try
     $data = json_decode($raw, true, 512, JSON_THROW_ON_ERROR);
 
     $name = trim((string) ($data['name'] ?? ''));
+    $locationName = trim((string) ($data['location_name'] ?? ''));
     $latitude = (float) ($data['latitude'] ?? 0.0);
     $longitude = (float) ($data['longitude'] ?? 0.0);
 
@@ -36,6 +37,13 @@ try
     {
         throw new RuntimeException('Name ist zu lang.');
     }
+
+    if (mb_strlen($locationName, 'UTF-8') > 128)
+    {
+        throw new RuntimeException('City ist zu lang.');
+    }
+
+    $locationNameDb = $locationName !== '' ? $locationName : null;
 
     if ($latitude < -90.0 || $latitude > 90.0)
     {
@@ -68,6 +76,7 @@ try
             name,
             latitude_e6,
             longitude_e6,
+            location_name,
             radio_bw_hz,
             radio_sf,
             radio_cr,
@@ -77,6 +86,7 @@ try
         VALUES
         (
             1,
+            ?,
             ?,
             ?,
             ?,
@@ -90,6 +100,7 @@ try
             name = VALUES(name),
             latitude_e6 = VALUES(latitude_e6),
             longitude_e6 = VALUES(longitude_e6),
+            location_name = VALUES(location_name),
             radio_bw_hz = VALUES(radio_bw_hz),
             radio_sf = VALUES(radio_sf),
             radio_cr = VALUES(radio_cr),
@@ -98,7 +109,7 @@ try
     ";
 
     $stmt = $db->prepare($sql);
-    $stmt->bind_param('sii', $name, $latitudeE6, $longitudeE6);
+    $stmt->bind_param('siis', $name, $latitudeE6, $longitudeE6, $locationNameDb);
     $stmt->execute();
     $stmt->close();
 

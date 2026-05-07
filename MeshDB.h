@@ -164,12 +164,12 @@ public:
     static void Shutdown();
     static bool IsReady();
 
-    static bool StoreAdvert(const DataConnector::AdvertInfo& info, const std::string& summary);
+    static bool StoreAdvert(const DataConnector::AdvertInfo& info);
     static bool StoreMessage(const DataConnector::MessageInfo& info, const std::string& summary);
 
     static bool StorePushAdvert(const DataConnector::PushAdvertInfo& info, const std::string& summary);
     static bool StorePushPathUpdated(const DataConnector::PushPathUpdatedInfo& info, const std::string& summary);
-    static bool StorePushNewAdvert(const DataConnector::PushNewAdvertInfo& info, const std::string& summary);
+    static bool StorePushNewAdvert(const DataConnector::PushNewAdvertInfo& info);
     static bool StorePushUnknown(const DataConnector::PushUnknownInfo& info, const std::string& summary);
     static bool StoreCompanionRadioStatusJson(const std::string& jsonText);
     static bool StoreCompanionRadioConnected(bool connected);
@@ -249,15 +249,8 @@ public:
     static bool DeleteChannelByKeyHex(const std::string& keyHex);
     static bool ClearChannelsTable();
 
-    static bool SaveCompanionConfig(
-                const std::string& name,
-                int32_t latitudeE6,
-                int32_t longitudeE6,
-                uint32_t radioBwHz,
-                uint8_t radioSf,
-                uint8_t radioCr);
-
     static std::optional<CompanionConfig> LoadCompanionConfig();
+    static std::string GetCompanionLocationName();
     static bool MarkCompanionConfigApplied();
     static bool MarkCompanionConfigApplyFailed(const std::string& error);
     static bool UpdateDiscoverJobResultCount(
@@ -318,6 +311,8 @@ private:
     static bool UpsertNodeFromPushAdvert(const DataConnector::PushAdvertInfo& info);
     static bool UpsertNodeFromPushNewAdvert(const DataConnector::PushNewAdvertInfo& info);
     static bool UpsertNodeFromPathUpdated(const DataConnector::PushPathUpdatedInfo& info);
+    static bool UpsertRepeaterNodeFromAdvert(const DataConnector::AdvertInfo& info);
+    static bool UpsertRepeaterNodeFromPushNewAdvert(const DataConnector::PushNewAdvertInfo& info);
 
     static MYSQL* s_conn;
     static Config s_config;

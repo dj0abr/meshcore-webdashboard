@@ -186,8 +186,10 @@ void MessageRouter::HandleTestChannelMessage(const MeshCoreClient::RxMessage& ms
 
     const std::string senderName = ExtractSenderName(msg.text);
 
+    const std::string locName = MeshDB::GetCompanionLocationName();
+
     std::string reply =                 "";
-    if (!senderName.empty()) reply +=   "@[" + senderName + "] 🏓 Pong";
+    if (!senderName.empty()) reply +=   "@[" + senderName + "] 🏓 Pong: " + locName;
     reply +=                            " | Hops: " + std::to_string(static_cast<unsigned>(msg.pathLen));
 
     if (!MeshDB::EnqueueChannelTxFromBot(msg.channelIdx, reply))

@@ -748,6 +748,48 @@ bool MeshCoreClient::setRadioParams(uint32_t freqHz,
     return ((*resp)[0] == MeshCoreProto::RESP_CODE_OK);
 }
 
+bool MeshCoreClient::setPathHashMode(uint8_t mode)
+{
+    if (!isConnected())
+    {
+        return false;
+    }
+
+    if (mode > 2)
+    {
+        return false;
+    }
+
+    std::vector<uint8_t> cmd;
+    cmd.reserve(3);
+
+    cmd.push_back(MeshCoreProto::CMD_SET_PATH_HASH_MODE);
+    cmd.push_back(0x00);
+    cmd.push_back(mode);
+
+    std::optional<std::vector<uint8_t>> resp;
+
+    {
+        std::lock_guard<std::mutex> apiLock(m_apiMutex);
+        resp = m_link.requestResponseAny(
+            cmd,
+            std::vector<uint8_t>
+            {
+                MeshCoreProto::RESP_CODE_OK,
+                MeshCoreProto::RESP_CODE_ERR
+            },
+            3000
+        );
+    }
+
+    if (!resp.has_value() || resp->empty())
+    {
+        return false;
+    }
+
+    return ((*resp)[0] == MeshCoreProto::RESP_CODE_OK);
+}
+
 bool MeshCoreClient::sendSelfAdvert(bool flood)
 {
     if (!isConnected())
@@ -1746,7 +1788,7 @@ std::optional<std::vector<MeshCoreClient::DiscoverResult>> MeshCoreClient::disco
     cmd.push_back(static_cast<uint8_t>((tag >> 8) & 0xFF));
     cmd.push_back(static_cast<uint8_t>((tag >> 16) & 0xFF));
     cmd.push_back(static_cast<uint8_t>((tag >> 24) & 0xFF));
-
+/*
     std::cout
         << "[discover] TX CMD_SEND_CONTROL_DATA opcode=0x81 filter=0x"
         << std::hex << static_cast<unsigned>(typeFilter)
@@ -1754,7 +1796,7 @@ std::optional<std::vector<MeshCoreClient::DiscoverResult>> MeshCoreClient::disco
         << std::dec
         << " raw=" << bytesToHexVec(cmd).c_str()
         << "\n";
-
+*/
     auto ack = m_link.requestResponse(cmd, MeshCoreProto::RESP_CODE_OK, ackTimeoutMs);
 
     if (!ack.has_value())
@@ -1767,7 +1809,7 @@ std::optional<std::vector<MeshCoreClient::DiscoverResult>> MeshCoreClient::disco
         return std::nullopt;
     }
 
-    std::cout << "[discover] ACK OK raw=" << bytesToHexVec(*ack).c_str() << "\n";
+    // std::cout << "[discover] ACK OK raw=" << bytesToHexVec(*ack).c_str() << "\n";
 
     std::map<std::string, DiscoverResult> collected;
 
@@ -1831,7 +1873,7 @@ std::optional<std::vector<MeshCoreClient::DiscoverResult>> MeshCoreClient::disco
             if (it == collected.end())
             {
                 collected.emplace(key, r);
-
+/*
                 std::cout
                     << "[discover] node="
                     << nodeId8ToHex(r.nodeId)
@@ -1840,6 +1882,7 @@ std::optional<std::vector<MeshCoreClient::DiscoverResult>> MeshCoreClient::disco
                     << " rssi=" << r.rssiDbm
                     << " source=0x" << std::hex << static_cast<unsigned>(r.sourceCode) << std::dec
                     << "\n";
+*/                    
             }
             else
             {
@@ -1849,6 +1892,7 @@ std::optional<std::vector<MeshCoreClient::DiscoverResult>> MeshCoreClient::disco
 
                     if (m_enableRxLog.load())
                     {
+/*                        
                         std::cout
                             << "[discover] node="
                             << nodeId8ToHex(r.nodeId)
@@ -1856,6 +1900,7 @@ std::optional<std::vector<MeshCoreClient::DiscoverResult>> MeshCoreClient::disco
                             << std::hex << static_cast<unsigned>(r.sourceCode)
                             << std::dec
                             << "\n";
+*/                            
                     }
                 }
                 else
@@ -1898,7 +1943,7 @@ std::optional<std::vector<MeshCoreClient::DiscoverResult>> MeshCoreClient::disco
         out.push_back(entry.second);
     }
 
-    std::cout << "[discover] done, " << out.size() << " unique nodes found\n";
+    //std::cout << "[discover] done, " << out.size() << " unique nodes found\n";
 
     return out;
 }

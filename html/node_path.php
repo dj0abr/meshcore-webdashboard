@@ -105,7 +105,19 @@ function readCompanionEndpoint(mysqli $db): array
 
 try
 {
-    $nodeDbId = (int) ($_GET['node_id'] ?? 0);
+    $nodeRef = trim((string) ($_GET['node_id'] ?? ''));
+
+    if (preg_match('/^(nodes|repeaternodes):(\d+)$/', $nodeRef, $matches))
+    {
+        $nodeTable = $matches[1];
+        $nodeDbId = (int) $matches[2];
+    }
+    else
+    {
+        // Abwärtskompatibel: alte rein numerische IDs werden als nodes.id behandelt.
+        $nodeTable = 'nodes';
+        $nodeDbId = (int) $nodeRef;
+    }
 
     if ($nodeDbId <= 0)
     {
@@ -127,16 +139,18 @@ try
         SELECT
             n.id,
             n.name,
+            n.prefix6_hex,
             n.adv_lat_e6,
             n.adv_lon_e6,
             p.path_text,
             p.path_len,
             p.path_hash_size,
             p.last_seen_at
-        FROM nodes n
+        FROM " . $nodeTable . " n
         LEFT JOIN node_advert_paths p
             ON LOWER(p.public_key_hex) = LOWER(n.public_key_hex)
         WHERE n.id = ?
+        AND n.public_key_hex IS NOT NULL
         LIMIT 1
     ";
 
@@ -146,6 +160,7 @@ try
     $stmtNode->bind_result(
         $id,
         $name,
+        $prefix6Hex,
         $advLatE6,
         $advLonE6,
         $pathText,
@@ -163,6 +178,7 @@ try
     [
         'id' => (int) $id,
         'name' => (string) $name,
+        'prefix6_hex' => ($prefix6Hex !== null) ? (string) $prefix6Hex : null,
         'adv_lat_e6' => ($advLatE6 !== null) ? (int) $advLatE6 : null,
         'adv_lon_e6' => ($advLonE6 !== null) ? (int) $advLonE6 : null,
     ];
@@ -179,12 +195,11 @@ try
             name,
             adv_lat_e6,
             adv_lon_e6
-        FROM nodes
-        WHERE prefix6_hex IS NOT NULL
-        AND LOWER(prefix6_hex) LIKE ?
-        AND advert_type = 2
-        ORDER BY name ASC, prefix6_hex ASC
-    ";
+            FROM repeaternodes
+            WHERE public_key_hex IS NOT NULL
+            AND prefix6_hex IS NOT NULL
+            AND LOWER(prefix6_hex) LIKE ?
+            ORDER BY name ASC, prefix6_hex ASC    ";
 
     $stmtNodes = $db->prepare($sqlNodes);
 
@@ -217,7 +232,7 @@ try
             'endpoint' => $endpoint,
             'path' =>
             [
-                'id' => (int) $nodeDbId,
+                'id' => $nodeRef,
                 'created_at' => $pathAtValue,
                 'path_text' => $pathTextValue,
                 'path_len' => ($pathLen !== null) ? (int) $pathLen : null,

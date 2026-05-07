@@ -50,9 +50,58 @@ try
 
     $db->set_charset('utf8mb4');
 
+    $nodeUnionSql = "
+        SELECT
+            CONCAT('nodes:', id) AS id,
+            id AS db_id,
+            'nodes' AS node_table,
+            node_id,
+            advert_type,
+            name,
+            public_key_hex,
+            prefix6_hex,
+            last_advert_at,
+            first_seen_at,
+            updated_at,
+            last_mod_at,
+            advert_flags,
+            adv_lat_e6,
+            adv_lon_e6
+        FROM nodes n0
+        WHERE n0.public_key_hex IS NOT NULL
+        AND NOT EXISTS
+        (
+            SELECT 1
+            FROM repeaternodes r0
+            WHERE r0.public_key_hex IS NOT NULL
+            AND LOWER(r0.public_key_hex) = LOWER(n0.public_key_hex)
+        )
+        UNION ALL
+        SELECT
+            CONCAT('repeaternodes:', id) AS id,
+            id AS db_id,
+            'repeaternodes' AS node_table,
+            node_id,
+            advert_type,
+            name,
+            public_key_hex,
+            prefix6_hex,
+            last_advert_at,
+            first_seen_at,
+            updated_at,
+            last_mod_at,
+            advert_flags,
+            adv_lat_e6,
+            adv_lon_e6
+        FROM repeaternodes
+        WHERE public_key_hex IS NOT NULL
+    ";
+
     $sql = "
         SELECT
             n.id,
+            n.db_id,
+            n.node_table,
             n.node_id,
             n.advert_type,
             n.name,
@@ -71,7 +120,7 @@ try
             p.last_seen_at AS last_advert_path_at,
             COUNT(cm.id) AS msg_count,
             MAX(cm.timestamp_epoch) AS newest_msg_epoch
-        FROM nodes n
+        FROM (" . $nodeUnionSql . ") n
         LEFT JOIN node_advert_paths p
             ON LOWER(p.public_key_hex) = LOWER(n.public_key_hex)
         LEFT JOIN chat_messages cm
@@ -103,6 +152,8 @@ try
     $sql .= "
         GROUP BY
             n.id,
+            n.db_id,
+            n.node_table,
             n.node_id,
             n.advert_type,
             n.name,
@@ -131,7 +182,9 @@ try
     {
         $nodes[] =
         [
-            'id' => (int) $row['id'],
+            'id' => $row['id'],
+            'db_id' => (int) $row['db_id'],
+            'node_table' => $row['node_table'],
             'node_id' => ($row['node_id'] !== null) ? (int) $row['node_id'] : null,
             'advert_type' => (int) $row['advert_type'],
             'advert_type_label' => advertTypeLabel((int) $row['advert_type']),
