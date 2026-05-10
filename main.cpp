@@ -10,6 +10,7 @@ Backend und GUI kommunizieren über eine Datenbank.
 #include "PushRouter.h"
 #include "MessageRouter.h"
 #include "CallsignLocationBackfillThread.h"
+#include "RepeaterNodeSyncThread.h"
 
 #include <cstdlib>
 #include <chrono>
@@ -127,6 +128,28 @@ int main(int argc, char** argv)
         backfillCfg.delayBetweenLookups = std::chrono::milliseconds(1500);
         CallsignLocationBackfillThread callsignBackfill(backfillCfg);
         callsignBackfill.Start();
+
+        RepeaterNodeSyncThread::Config repeaterSyncCfg;
+        if (const char* v = std::getenv("MESHCORE_REPEATER_SYNC_URL"); v != nullptr)
+        {
+            repeaterSyncCfg.baseUrl = v;
+        }
+        if (const char* v = std::getenv("MESHCORE_REPEATER_SYNC_TOKEN"); v != nullptr)
+        {
+            repeaterSyncCfg.apiToken = v;
+        }
+        if (const char* v = std::getenv("MESHCORE_REPEATER_SYNC_INTERVAL_SEC"); v != nullptr)
+        {
+            const long sec = std::strtol(v, nullptr, 10);
+
+            if (sec > 0)
+            {
+                repeaterSyncCfg.runInterval = std::chrono::seconds(sec);
+            }
+        }
+
+        RepeaterNodeSyncThread repeaterSync(repeaterSyncCfg);
+        repeaterSync.Start();
 
         MeshDB::StoreCompanionRadioConnected(true);
 

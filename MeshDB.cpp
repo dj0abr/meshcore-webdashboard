@@ -418,6 +418,7 @@ bool MeshDB::EnsureSchema()
         "    last_mod_at DATETIME DEFAULT NULL,"
         "    first_seen_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,"
         "    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,"
+        "    is_local TINYINT(1) NOT NULL DEFAULT 0,"
         "    PRIMARY KEY (id),"
         "    UNIQUE KEY uq_repeaternodes_node_id (node_id),"
         "    UNIQUE KEY uq_repeaternodes_public_key_hex (public_key_hex),"
@@ -3479,6 +3480,57 @@ bool MeshDB::UpdateNodeAdvertPathFromRxLog(const DataConnector::PushRxLogInfo& i
         return true;
     }
 
+    if (info.hasAdvertRole && info.advertRole == 2)
+    {
+        const std::string prefix6Hex = info.advertPublicKey.substr(0, 12);
+
+        std::ostringstream nodeSql;
+
+        nodeSql
+            << "INSERT IGNORE INTO repeaternodes ("
+            << "advert_type, advert_flags, name, public_key_hex, prefix6_hex, "
+            << "adv_lat_e6, adv_lon_e6, last_advert_at, first_seen_at, is_local"
+            << ") VALUES ("
+            << unsigned(info.advertRole) << ", "
+            << "0, "
+            << (info.hasAdvertName ? ToSqlString(info.advertName) : "''") << ", "
+            << ToSqlString(info.advertPublicKey) << ", "
+            << ToSqlString(prefix6Hex) << ", ";
+
+        if (info.hasAdvertLatitudeE6)
+        {
+            nodeSql << info.advertLatitudeE6;
+        }
+        else
+        {
+            nodeSql << "NULL";
+        }
+
+        nodeSql << ", ";
+
+        if (info.hasAdvertLongitudeE6)
+        {
+            nodeSql << info.advertLongitudeE6;
+        }
+        else
+        {
+            nodeSql << "NULL";
+        }
+
+        nodeSql
+            << ", " << (info.hasAdvertTimestamp ? ToSqlDateTimeFromU32(info.advertTimestamp) : "NULL")
+            << ", COALESCE("
+            << (info.hasAdvertTimestamp ? ToSqlDateTimeFromU32(info.advertTimestamp) : "NULL")
+            << ", CURRENT_TIMESTAMP), "
+            << "1"
+            << ")";
+
+        if (!Execute(nodeSql.str()))
+        {
+            return false;
+        }
+    }
+
     std::ostringstream sql;
 
     sql
@@ -3525,3 +3577,400 @@ bool MeshDB::StoreCompanionRadioConnected(bool connected)
     return Execute(oss.str());
 }
 
+
+std::vector<MeshDB::RepeaterNodeSyncRecord> MeshDB::ListRepeaterNodesForSync()
+{
+    std::vector<RepeaterNodeSyncRecord> nodes;
+    std::lock_guard<std::mutex> lock(s_mutex);
+
+    if (!s_ready || s_conn == nullptr)
+    {
+        return nodes;
+    }
+
+    const char* sql =
+        "SELECT "
+        "node_id, "
+        "advert_type, "
+        "advert_flags, "
+        "name, "
+        "public_key_hex, "
+        "prefix6_hex, "
+        "adv_lat_e6, "
+        "adv_lon_e6, "
+        "DATE_FORMAT(last_advert_at, '%Y-%m-%d %H:%i:%s') AS last_advert_at, "
+        "DATE_FORMAT(last_mod_at, '%Y-%m-%d %H:%i:%s') AS last_mod_at, "
+        "DATE_FORMAT(first_seen_at, '%Y-%m-%d %H:%i:%s') AS first_seen_at "
+        "FROM repeaternodes "
+        "WHERE public_key_hex IS NOT NULL "
+        "  AND public_key_hex <> '' "
+        "ORDER BY id ASC";
+
+    if (mysql_query(s_conn, sql) != 0)
+    {
+        std::cerr << "MeshDB SQL error: " << mysql_error(s_conn) << "\n";
+        return nodes;
+    }
+
+    MYSQL_RES* result = mysql_store_result(s_conn);
+
+    if (result == nullptr)
+    {
+        std::cerr << "MeshDB SQL store result error: " << mysql_error(s_conn) << "\n";
+        return nodes;
+    }
+
+    MYSQL_ROW row = nullptr;
+
+    while ((row = mysql_fetch_row(result)) != nullptr)
+    {
+        RepeaterNodeSyncRecord node;
+
+        node.hasNodeId = row[0] != nullptr;
+        node.nodeId = RowU32(row, 0);
+        node.advertType = RowU8(row, 1);
+        node.advertFlags = RowU8(row, 2);
+        node.name = RowString(row, 3);
+        node.publicKeyHex = RowString(row, 4);
+        node.prefix6Hex = RowString(row, 5);
+        node.hasAdvLatE6 = row[6] != nullptr;
+        node.advLatE6 = RowI32(row, 6);
+        node.hasAdvLonE6 = row[7] != nullptr;
+        node.advLonE6 = RowI32(row, 7);
+        node.lastAdvertAt = RowString(row, 8);
+        node.lastModAt = RowString(row, 9);
+        node.firstSeenAt = RowString(row, 10);
+
+        nodes.push_back(node);
+    }
+
+    mysql_free_result(result);
+    return nodes;
+}
+
+bool MeshDB::InsertMissingRepeaterNodesFromSync(
+    const std::vector<RepeaterNodeSyncRecord>& nodes,
+    unsigned* inserted,
+    unsigned* ignored,
+    unsigned* skipped)
+{
+    if (inserted != nullptr)
+    {
+        *inserted = 0;
+    }
+
+    if (ignored != nullptr)
+    {
+        *ignored = 0;
+    }
+
+    if (skipped != nullptr)
+    {
+        *skipped = 0;
+    }
+
+    std::lock_guard<std::mutex> lock(s_mutex);
+
+    if (!s_ready || s_conn == nullptr)
+    {
+        return false;
+    }
+
+    if (mysql_query(s_conn, "START TRANSACTION") != 0)
+    {
+        std::cerr << "MeshDB SQL error: " << mysql_error(s_conn) << "\n";
+        return false;
+    }
+
+    bool ok = true;
+
+    for (const RepeaterNodeSyncRecord& node : nodes)
+    {
+        if (node.publicKeyHex.size() != 64)
+        {
+            if (skipped != nullptr)
+            {
+                (*skipped)++;
+            }
+            continue;
+        }
+
+printf(
+    "[RepeaterSync] %s: %s\n",
+    inserted ? "INSERTED" : "EXISTS",
+    node.publicKeyHex.c_str()
+);        
+
+        std::ostringstream oss;
+
+        oss
+            << "INSERT IGNORE INTO repeaternodes ("
+            << "node_id, advert_type, advert_flags, name, public_key_hex, prefix6_hex, "
+            << "adv_lat_e6, adv_lon_e6, last_advert_at, last_mod_at, first_seen_at"
+            << ") VALUES (";
+
+        if (node.hasNodeId)
+        {
+            oss << node.nodeId;
+        }
+        else
+        {
+            oss << "NULL";
+        }
+
+        oss
+            << ", " << unsigned(node.advertType)
+            << ", " << unsigned(node.advertFlags)
+            << ", " << ToSqlString(node.name)
+            << ", " << ToSqlString(node.publicKeyHex)
+            << ", " << ToSqlNullableString(node.prefix6Hex)
+            << ", ";
+
+        if (node.hasAdvLatE6)
+        {
+            oss << node.advLatE6;
+        }
+        else
+        {
+            oss << "NULL";
+        }
+
+        oss << ", ";
+
+        if (node.hasAdvLonE6)
+        {
+            oss << node.advLonE6;
+        }
+        else
+        {
+            oss << "NULL";
+        }
+
+        oss
+            << ", " << ToSqlNullableString(node.lastAdvertAt)
+            << ", " << ToSqlNullableString(node.lastModAt)
+            << ", COALESCE(" << ToSqlNullableString(node.firstSeenAt) << ", CURRENT_TIMESTAMP)"
+            << ")";
+
+        if (mysql_query(s_conn, oss.str().c_str()) != 0)
+        {
+            std::cerr << "MeshDB SQL error: " << mysql_error(s_conn) << "\n";
+            std::cerr << "SQL: " << oss.str() << "\n";
+            ok = false;
+            break;
+        }
+
+        const my_ulonglong affected = mysql_affected_rows(s_conn);
+
+        if (affected > 0)
+        {
+            if (inserted != nullptr)
+            {
+                (*inserted)++;
+            }
+        }
+        else
+        {
+            if (ignored != nullptr)
+            {
+                (*ignored)++;
+            }
+        }
+    }
+
+    if (ok)
+    {
+        if (mysql_query(s_conn, "COMMIT") != 0)
+        {
+            std::cerr << "MeshDB SQL error: " << mysql_error(s_conn) << "\n";
+            ok = false;
+        }
+    }
+
+    if (!ok)
+    {
+        mysql_query(s_conn, "ROLLBACK");
+    }
+
+    return ok;
+}
+
+std::vector<MeshDB::NodeAdvertPathSyncRecord> MeshDB::ListNodeAdvertPathsForSync()
+{
+    std::vector<NodeAdvertPathSyncRecord> paths;
+    std::lock_guard<std::mutex> lock(s_mutex);
+
+    if (!s_ready || s_conn == nullptr)
+    {
+        return paths;
+    }
+
+    const char* sql =
+        "SELECT "
+        "public_key_hex, "
+        "path_len, "
+        "path_hash_size, "
+        "path_text, "
+        "DATE_FORMAT(last_seen_at, '%Y-%m-%d %H:%i:%s') AS last_seen_at "
+        "FROM node_advert_paths "
+        "WHERE public_key_hex IS NOT NULL "
+        "  AND public_key_hex <> '' "
+        "ORDER BY public_key_hex ASC";
+
+    if (mysql_query(s_conn, sql) != 0)
+    {
+        std::cerr << "MeshDB SQL error: " << mysql_error(s_conn) << "\n";
+        return paths;
+    }
+
+    MYSQL_RES* result = mysql_store_result(s_conn);
+
+    if (result == nullptr)
+    {
+        std::cerr << "MeshDB SQL store result error: " << mysql_error(s_conn) << "\n";
+        return paths;
+    }
+
+    MYSQL_ROW row = nullptr;
+
+    while ((row = mysql_fetch_row(result)) != nullptr)
+    {
+        NodeAdvertPathSyncRecord path;
+
+        path.publicKeyHex = RowString(row, 0);
+        path.hasPathLen = row[1] != nullptr;
+        path.pathLen = RowU8(row, 1);
+        path.hasPathHashSize = row[2] != nullptr;
+        path.pathHashSize = RowU8(row, 2);
+        path.pathText = RowString(row, 3);
+        path.lastSeenAt = RowString(row, 4);
+
+        paths.push_back(path);
+    }
+
+    mysql_free_result(result);
+    return paths;
+}
+
+bool MeshDB::InsertMissingNodeAdvertPathsFromSync(
+    const std::vector<NodeAdvertPathSyncRecord>& paths,
+    unsigned* inserted,
+    unsigned* ignored,
+    unsigned* skipped)
+{
+    if (inserted != nullptr)
+    {
+        *inserted = 0;
+    }
+
+    if (ignored != nullptr)
+    {
+        *ignored = 0;
+    }
+
+    if (skipped != nullptr)
+    {
+        *skipped = 0;
+    }
+
+    std::lock_guard<std::mutex> lock(s_mutex);
+
+    if (!s_ready || s_conn == nullptr)
+    {
+        return false;
+    }
+
+    if (mysql_query(s_conn, "START TRANSACTION") != 0)
+    {
+        std::cerr << "MeshDB SQL error: " << mysql_error(s_conn) << "\n";
+        return false;
+    }
+
+    bool ok = true;
+
+    for (const NodeAdvertPathSyncRecord& path : paths)
+    {
+        if (path.publicKeyHex.size() != 64)
+        {
+            if (skipped != nullptr)
+            {
+                (*skipped)++;
+            }
+            continue;
+        }
+
+        std::ostringstream oss;
+
+        oss
+            << "INSERT IGNORE INTO node_advert_paths ("
+            << "public_key_hex, path_len, path_hash_size, path_text, last_seen_at"
+            << ") VALUES ("
+            << ToSqlString(path.publicKeyHex) << ", ";
+
+        if (path.hasPathLen)
+        {
+            oss << unsigned(path.pathLen);
+        }
+        else
+        {
+            oss << "NULL";
+        }
+
+        oss << ", ";
+
+        if (path.hasPathHashSize)
+        {
+            oss << unsigned(path.pathHashSize);
+        }
+        else
+        {
+            oss << "NULL";
+        }
+
+        oss
+            << ", " << ToSqlNullableString(path.pathText)
+            << ", COALESCE(" << ToSqlNullableString(path.lastSeenAt) << ", CURRENT_TIMESTAMP)"
+            << ")";
+
+        if (mysql_query(s_conn, oss.str().c_str()) != 0)
+        {
+            std::cerr << "MeshDB SQL error: " << mysql_error(s_conn) << "\n";
+            std::cerr << "SQL: " << oss.str() << "\n";
+            ok = false;
+            break;
+        }
+
+        const my_ulonglong affected = mysql_affected_rows(s_conn);
+
+        if (affected > 0)
+        {
+            if (inserted != nullptr)
+            {
+                (*inserted)++;
+            }
+        }
+        else
+        {
+            if (ignored != nullptr)
+            {
+                (*ignored)++;
+            }
+        }
+    }
+
+    if (ok)
+    {
+        if (mysql_query(s_conn, "COMMIT") != 0)
+        {
+            std::cerr << "MeshDB SQL error: " << mysql_error(s_conn) << "\n";
+            ok = false;
+        }
+    }
+
+    if (!ok)
+    {
+        mysql_query(s_conn, "ROLLBACK");
+    }
+
+    return ok;
+}

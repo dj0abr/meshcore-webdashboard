@@ -66,7 +66,8 @@ try
             last_mod_at,
             advert_flags,
             adv_lat_e6,
-            adv_lon_e6
+            adv_lon_e6,
+            1 AS is_local
         FROM nodes n0
         WHERE n0.public_key_hex IS NOT NULL
         AND NOT EXISTS
@@ -92,7 +93,8 @@ try
             last_mod_at,
             advert_flags,
             adv_lat_e6,
-            adv_lon_e6
+            adv_lon_e6,
+            is_local
         FROM repeaternodes
         WHERE public_key_hex IS NOT NULL
     ";
@@ -114,6 +116,7 @@ try
             n.advert_flags,
             n.adv_lat_e6,
             n.adv_lon_e6,
+            n.is_local,
             p.path_len AS last_advert_path_len,
             p.path_hash_size AS last_advert_path_hash_size,
             p.path_text AS last_advert_path_text,
@@ -166,6 +169,7 @@ try
             n.advert_flags,
             n.adv_lat_e6,
             n.adv_lon_e6,
+            n.is_local,
             p.path_len,
             p.path_hash_size,
             p.path_text,
@@ -198,6 +202,7 @@ try
             'advert_flags' => ($row['advert_flags'] !== null) ? (int) $row['advert_flags'] : null,
             'adv_lat' => ($row['adv_lat_e6'] !== null) ? ((int) $row['adv_lat_e6'] / 1000000.0) : null,
             'adv_lon' => ($row['adv_lon_e6'] !== null) ? ((int) $row['adv_lon_e6'] / 1000000.0) : null,
+            'is_local' => (int) $row['is_local'],
             'last_advert_path_len' => ($row['last_advert_path_len'] !== null) ? (int) $row['last_advert_path_len'] : null,
             'last_advert_path_hash_size' => ($row['last_advert_path_hash_size'] !== null) ? (int) $row['last_advert_path_hash_size'] : null,
             'last_advert_path_text' => $row['last_advert_path_text'],

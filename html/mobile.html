@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <title>MeshCore Mobile</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+    <link rel="stylesheet" href="mobile.css?v=5">
+    <link rel="icon" type="image/png" href="meshcore.png">
+</head>
+<body>
+    <div class="mobile-shell">
+        <header class="mobile-header">
+            <button type="button" id="mobileBackButton" class="icon-button" hidden aria-label="Zurück" data-i18n-aria-label="common.back">‹</button>
+            <div class="mobile-title-block">
+                <div id="mobileTitle" class="mobile-title">MeshCore</div>
+                <div id="mobileSubtitle" class="mobile-subtitle">Mobile</div>
+            </div>
+            <button type="button" id="mobileRefreshButton" class="icon-button" aria-label="Aktualisieren" data-i18n-aria-label="common.refresh">⟳</button>
+        </header>
+
+        <main id="mobileView" class="mobile-view" aria-live="polite"></main>
+
+        <footer id="mobileComposer" class="mobile-composer" hidden>
+            <textarea id="mobileMessageInput" rows="1" maxlength="230" placeholder="Nachricht ..." data-i18n-placeholder="chat.input_placeholder_mobile"></textarea>
+            <button type="button" id="mobileSendButton" class="send-button" aria-label="Senden" data-i18n-aria-label="chat.send">➤</button>
+        </footer>
+
+        <nav id="mobileNav" class="mobile-nav" aria-label="Mobile Navigation">
+            <button type="button" class="nav-button active" data-view="contacts" data-i18n="tabs.contacts">Kontakte</button>
+            <button type="button" class="nav-button" data-view="channels" data-i18n="tabs.channels">Channels</button>
+            <button type="button" class="nav-button" data-view="info" aria-label="Info" data-i18n-aria-label="mobile.nav.info">⚙</button>
+        </nav>
+
+        <div id="setupModal" class="mobile-modal-overlay" aria-hidden="true">
+            <div class="mobile-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="setupModalTitle">
+                <div class="mobile-modal-header">
+                    <h3 id="setupModalTitle" data-i18n="setup.title">Companion Setup</h3>
+                </div>
+                <div class="mobile-modal-body">
+                    <div class="mobile-form-group">
+                        <label for="setupNameInput" data-i18n="setup.name">Name</label>
+                        <input id="setupNameInput" type="text" autocomplete="off">
+                    </div>
+                    <div class="mobile-form-group">
+                        <label for="setupCityInput" data-i18n="setup.city">City</label>
+                        <input id="setupCityInput" type="text" autocomplete="off" maxlength="128">
+                    </div>
+                    <div class="mobile-form-grid">
+                        <div class="mobile-form-group">
+                            <label for="setupLatInput" data-i18n="setup.latitude">Latitude</label>
+                            <input id="setupLatInput" type="text" autocomplete="off" inputmode="decimal">
+                        </div>
+                        <div class="mobile-form-group">
+                            <label for="setupLonInput" data-i18n="setup.longitude">Longitude</label>
+                            <input id="setupLonInput" type="text" autocomplete="off" inputmode="decimal">
+                        </div>
+                    </div>
+                    <div class="mobile-form-group mobile-fixed-radio">
+                        <label data-i18n="setup.fixed_radio">Feste Funkparameter</label>
+                        <div>Frequenz: 869.618 MHz</div>
+                        <div>Bandwidth: 62.5 kHz</div>
+                        <div>SF: 8</div>
+                        <div>CR: 8</div>
+                        <div>TX Power: 22 dBm</div>
+                    </div>
+                    <div id="setupModalError" class="mobile-modal-error" style="display:none;"></div>
+                </div>
+                <div class="mobile-modal-footer">
+                    <button id="setupApplyButton" type="button" class="mobile-primary-button" data-i18n="setup.apply">Apply</button>
+                    <button id="setupCancelButton" type="button" data-i18n="setup.cancel">Cancel</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="discoverModal" class="mobile-modal-overlay" aria-hidden="true">
+            <div class="mobile-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="discoverModalTitle">
+                <div class="mobile-modal-header">
+                    <h3 id="discoverModalTitle" data-i18n="discover.title">Repeater Discovery</h3>
+                </div>
+                <div class="mobile-modal-body">
+                    <div class="mobile-form-group">
+                        <label data-i18n="discover.status.label">Status</label>
+                        <div id="discoverStatusText" class="mobile-status-text" data-i18n="discover.status.unknown">Unbekannt</div>
+                    </div>
+                    <div class="mobile-form-group">
+                        <label data-i18n="discover.job.label">Letzter Job</label>
+                        <div id="discoverJobInfo" class="mobile-modal-subtitle" data-i18n="discover.job.none">Noch kein Discover gestartet.</div>
+                    </div>
+                    <div class="mobile-form-group">
+                        <label data-i18n="discover.results.label">Gefundene Repeater</label>
+                        <div id="discoverResults" class="mobile-discover-results">
+                            <div class="mobile-discover-empty" data-i18n="discover.results.none">Noch keine Ergebnisse.</div>
+                        </div>
+                    </div>
+                    <div id="discoverModalError" class="mobile-modal-error" style="display:none;"></div>
+                </div>
+                <div class="mobile-modal-footer">
+                    <button id="discoverRepeatButton" type="button" class="mobile-primary-button" data-i18n="discover.button.start" disabled aria-disabled="true">START</button>
+                    <button id="discoverCloseButton" type="button" data-i18n="discover.button.close">Schließen</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="channelModal" class="mobile-modal-overlay" aria-hidden="true">
+            <div class="mobile-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="channelModalTitle">
+                <div class="mobile-modal-header">
+                    <h3 id="channelModalTitle">Channel</h3>
+                </div>
+                <div class="mobile-modal-body">
+                    <div id="channelModalSubtitle" class="mobile-modal-subtitle"></div>
+                    <div id="channelNameGroup" class="mobile-form-group">
+                        <label for="channelNameInput" data-i18n="channel.name">Kanalname</label>
+                        <input id="channelNameInput" type="text" autocomplete="off">
+                    </div>
+                    <div id="channelSecretGroup" class="mobile-form-group" style="display:none;">
+                        <label for="channelSecretInput" data-i18n="channel.secret">Secret Key</label>
+                        <input id="channelSecretInput" type="text" autocomplete="off">
+                    </div>
+                    <div id="channelRemoveGroup" class="mobile-form-group" style="display:none;">
+                        <label for="channelRemoveSelect" data-i18n="tabs.channels">Channels</label>
+                        <select id="channelRemoveSelect"></select>
+                    </div>
+                    <div id="channelResultGroup" class="mobile-form-group" style="display:none;">
+                        <label for="channelResultSecret" data-i18n="channel.generated_secret">Generierter Secret Key</label>
+                        <input id="channelResultSecret" type="text" readonly>
+                        <div id="channelQrCode" class="mobile-channel-qr"></div>
+                    </div>
+                    <div id="channelModalError" class="mobile-modal-error" style="display:none;"></div>
+                </div>
+                <div class="mobile-modal-footer">
+                    <button id="channelConfirmButton" type="button" class="mobile-primary-button">OK</button>
+                    <button id="channelCancelButton" type="button" data-i18n="setup.cancel">Cancel</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="languageModal" class="mobile-modal-overlay" aria-hidden="true">
+            <div class="mobile-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="languageModalTitle">
+                <div class="mobile-modal-header">
+                    <h3 id="languageModalTitle" data-i18n="language.title">Sprache</h3>
+                </div>
+                <div class="mobile-modal-body">
+                    <div class="mobile-form-group">
+                        <label for="languageSelect" data-i18n="language.label">Language</label>
+                        <select id="languageSelect" class="mobile-language-select" aria-label="Language" data-i18n-aria-label="language.label">
+                            <option value="de">DE</option>
+                            <option value="en">EN</option>
+                            <option value="es">ES</option>
+                            <option value="fr">FR</option>
+                            <option value="it">IT</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="mobile-modal-footer">
+                    <button id="languageCloseButton" type="button" class="mobile-primary-button">OK</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="i18n.js?v=3"></script>
+    <script src="meshcore-shared.js?v=3"></script>
+    <script src="meshcore-api.js?v=3"></script>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <script src="mobile.js?v=5"></script>
+</body>
+</html>

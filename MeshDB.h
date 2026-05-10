@@ -83,6 +83,36 @@ public:
         std::string syncError;
         uint32_t lastSeenEpoch = 0;
     };    
+
+    struct RepeaterNodeSyncRecord
+    {
+        bool hasNodeId = false;
+        uint32_t nodeId = 0;
+        uint8_t advertType = 0;
+        uint8_t advertFlags = 0;
+        std::string name;
+        std::string publicKeyHex;
+        std::string prefix6Hex;
+        bool hasAdvLatE6 = false;
+        int32_t advLatE6 = 0;
+        bool hasAdvLonE6 = false;
+        int32_t advLonE6 = 0;
+        std::string lastAdvertAt;
+        std::string lastModAt;
+        std::string firstSeenAt;
+    };
+
+    struct NodeAdvertPathSyncRecord
+    {
+        std::string publicKeyHex;
+        bool hasPathLen = false;
+        uint8_t pathLen = 0;
+        bool hasPathHashSize = false;
+        uint8_t pathHashSize = 0;
+        std::string pathText;
+        std::string lastSeenAt;
+    };
+
     struct CompanionConfig
     {
         std::string name;
@@ -287,6 +317,20 @@ public:
         const std::string& messageText);
 
     static bool UpdateNodeAdvertPathFromRxLog(const DataConnector::PushRxLogInfo& info);
+
+    static std::vector<RepeaterNodeSyncRecord> ListRepeaterNodesForSync();
+    static bool InsertMissingRepeaterNodesFromSync(
+        const std::vector<RepeaterNodeSyncRecord>& nodes,
+        unsigned* inserted = nullptr,
+        unsigned* ignored = nullptr,
+        unsigned* skipped = nullptr);
+
+    static std::vector<NodeAdvertPathSyncRecord> ListNodeAdvertPathsForSync();
+    static bool InsertMissingNodeAdvertPathsFromSync(
+        const std::vector<NodeAdvertPathSyncRecord>& paths,
+        unsigned* inserted = nullptr,
+        unsigned* ignored = nullptr,
+        unsigned* skipped = nullptr);
 
 private:
 

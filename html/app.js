@@ -4,24 +4,61 @@ const CONTACT_READ_STORAGE_KEY = "meshcore.contactLastReadEpoch";
 const PATH_DISPLAY_SETTINGS_STORAGE_KEY = "meshcore.pathDisplaySettings";
 const NOTIFICATION_AUDIO_ENABLED_STORAGE_KEY = "meshcore.notificationAudioEnabled";
 
-function loadNotificationAudioEnabled()
+const MeshCoreShared = window.MeshCoreShared;
+const MeshCoreApi = window.MeshCoreApi;
+
+const
 {
-    try
-    {
-        const raw = localStorage.getItem(NOTIFICATION_AUDIO_ENABLED_STORAGE_KEY);
+    escapeHtml,
+    isChatNode,
+    isRoomNode,
+    isChannelRow,
+    isChatLikeNode,
+    isRepeaterNode,
+    getChatKindLabel,
+    getChatKindValue,
+    parseMariaDbDateTime,
+    containsPossibleCallsign,
+    getNodeLatLon,
+    hasLocation,
+    hasValidCoords,
+    hasValidEndpointCoords,
+    e6ToDegrees,
+    degToRad,
+    distanceMeters,
+    formatDistanceMeters,
+    loadNotificationAudioEnabled,
+    loadPathDisplaySettings,
+    formatMessageText,
+    normalizeGuiTimestamp,
+    getTextCharacters,
+    limitTextCharacters,
+    getLocale,
+    tr,
+    buildMeshCoreChannelQrPayload,
+    formatDateTime,
+    formatEpochDateTime,
+    loadContactReadState,
+    saveContactReadState,
+    getContactReadKey,
+    getContactLastReadEpoch,
+    markContactAsRead,
+    getOutgoingStatusClass,
+    extractReplyNameFromMessage,
+    pruneImplausibleResolvedHops,
+    resolvePathGreedyFromEndpoint,
+    resolvePathBestRoute,
+    buildResolvedPathListEntry,
+    pathHasNoGaps,
+    selectPreferredResolvedPath,
+    buildResolvedPathList,
+    loadChannelReadState,
+    saveChannelReadState,
+    getChannelReadKey,
+    getChannelLastReadEpoch,
+    markChannelAsRead
+} = MeshCoreShared;
 
-        if (raw === null)
-        {
-            return true;
-        }
-
-        return raw === "1";
-    }
-    catch (err)
-    {
-        return true;
-    }
-}
 
 function saveNotificationAudioEnabled()
 {
@@ -43,38 +80,6 @@ function syncNotificationAudioCheckbox()
     if (el.notificationAudioToggle)
     {
         el.notificationAudioToggle.checked = state.notificationAudioEnabled;
-    }
-}
-
-function loadPathDisplaySettings()
-{
-    const defaults =
-    {
-        showNames: true,
-        showHash: true,
-        showDistances: true
-    };
-
-    try
-    {
-        const raw = localStorage.getItem(PATH_DISPLAY_SETTINGS_STORAGE_KEY);
-
-        if (!raw)
-        {
-            return defaults;
-        }
-
-        const saved = JSON.parse(raw);
-
-        return {
-            showNames: typeof saved.showNames === "boolean" ? saved.showNames : defaults.showNames,
-            showHash: typeof saved.showHash === "boolean" ? saved.showHash : defaults.showHash,
-            showDistances: typeof saved.showDistances === "boolean" ? saved.showDistances : defaults.showDistances
-        };
-    }
-    catch (err)
-    {
-        return defaults;
     }
 }
 
@@ -143,6 +148,7 @@ const el =
     chatTitle: document.getElementById("chatTitle"),
     callsignFilter: document.getElementById("callsignFilter"),
     activeFilter: document.getElementById("activeFilter"),
+    //localFilter: document.getElementById("localFilter"),
     chatBody: document.getElementById("chatBody"),
     chatTabsView: document.getElementById("chatTabsView"),
     tabMessagesViewBtn: document.getElementById("tabMessagesViewBtn"),
@@ -457,6 +463,7 @@ function setRightPanelHeader(title, subtitle = "")
     if (el.rightPanelSubtitle)
     {
         el.rightPanelSubtitle.textContent = subtitle;
+        el.rightPanelSubtitle.style.display = subtitle !== "" ? "" : "none";
     }
 }
 
@@ -492,17 +499,37 @@ function setRightPanelMode(mode, row = null)
 
     if (mode === "map")
     {
-        const rowName = String(row?.name || "").trim();
+        let subtitle = "";
 
-        let subtitle = rowName;
-        if(row?.last_advert_path_len !== null) subtitle += " Hops: " + row?.last_advert_path_len;
-        if(row?.last_advert_path_hash_size !== null) subtitle += " / Hash: " + row?.last_advert_path_hash_size + " Bytes";
-        if(row?.last_advert_path_text !== null) subtitle += " / Path: " + row?.last_advert_path_text;
+        if (row)
+        {
+            const rowName = String(row.name || "").trim();
+            const subtitleParts = [];
 
-        setRightPanelHeader(
-            tr("panel.map", "Map"),
-            subtitle !== "" ? subtitle : ""
-        );
+            if (rowName !== "")
+            {
+                subtitleParts.push(rowName);
+            }
+
+            if (row.last_advert_path_len != null)
+            {
+                subtitleParts.push("Hops: " + row.last_advert_path_len);
+            }
+
+            if (row.last_advert_path_hash_size != null)
+            {
+                subtitleParts.push("Hash: " + row.last_advert_path_hash_size + " Bytes");
+            }
+
+            if (row.last_advert_path_text != null && String(row.last_advert_path_text).trim() !== "")
+            {
+                subtitleParts.push("Path: " + row.last_advert_path_text);
+            }
+
+            subtitle = subtitleParts.join(" / ");
+        }
+
+        setRightPanelHeader(tr("panel.map", "Map"), subtitle);
     }
     else
     {
@@ -667,6 +694,36 @@ function buildPreferredPathMapPoints(preferredPath)
     return points;
 }
 
+
+function getPathSegmentDistanceMeters(fromPoint, toPoint)
+{
+    const rawExplicitDistance = fromPoint ? fromPoint.distance_m : null;
+
+    if (rawExplicitDistance !== null && rawExplicitDistance !== undefined && rawExplicitDistance !== "")
+    {
+        const explicitDistance = Number(rawExplicitDistance);
+
+        if (Number.isFinite(explicitDistance))
+        {
+            return explicitDistance;
+        }
+    }
+
+    if (!fromPoint || !toPoint)
+    {
+        return null;
+    }
+
+    const calculatedDistance = distanceMeters(
+        Math.round(Number(fromPoint.lat) * 1000000.0),
+        Math.round(Number(fromPoint.lon) * 1000000.0),
+        Math.round(Number(toPoint.lat) * 1000000.0),
+        Math.round(Number(toPoint.lon) * 1000000.0)
+    );
+
+    return Number.isFinite(calculatedDistance) ? calculatedDistance : null;
+}
+
 function showPreferredPathInPathMap(correlationKey, preferredPath)
 {
     if (!state.chatRow || !isChannelRow(state.chatRow))
@@ -769,11 +826,13 @@ function showPreferredPathInPathMap(correlationKey, preferredPath)
                 weight: 2
             }).addTo(state.chatPathLayer);
 
-            if (state.chatPathShowDistances && fromPoint.distance_m !== null)
+            const segmentDistanceM = getPathSegmentDistanceMeters(fromPoint, toPoint);
+
+            if (state.chatPathShowDistances && segmentDistanceM !== null)
             {
                 const midLat = (fromPoint.lat + toPoint.lat) / 2.0;
                 const midLon = (fromPoint.lon + toPoint.lon) / 2.0;
-                const distanceKm = fromPoint.distance_m / 1000.0;
+                const distanceKm = segmentDistanceM / 1000.0;
 
                 L.marker([midLat, midLon],
                 {
@@ -821,93 +880,6 @@ function showPreferredPathInPathMap(correlationKey, preferredPath)
 }
 
 const resolvedPathsByCorrelationKey = {};
-
-function formatMessageText(text)
-{
-    const escaped = escapeHtml(String(text || ""));
-
-    function countChar(value, ch)
-    {
-        let count = 0;
-        for (let i = 0; i < value.length; i++)
-        {
-            if (value[i] === ch)
-            {
-                count++;
-            }
-        }
-        return count;
-    }
-
-    function makeLink(url, original)
-    {
-        return '<a href="' + url + '" target="_blank" rel="noopener noreferrer">' + original + '</a>';
-    }
-
-    const withLinks = escaped.replace(
-        /((https?:\/\/[^\s<]+)|(www\.[^\s<]+))/g,
-        function(match)
-        {
-            let url = match;
-            let trailing = "";
-
-            while (url.length > 0)
-            {
-                const lastChar = url[url.length - 1];
-
-                if (/[.,;:!?\]]/.test(lastChar))
-                {
-                    trailing = lastChar + trailing;
-                    url = url.slice(0, -1);
-                    continue;
-                }
-
-                if (lastChar === ")")
-                {
-                    const openCount = countChar(url, "(");
-                    const closeCount = countChar(url, ")");
-
-                    if (closeCount > openCount)
-                    {
-                        trailing = lastChar + trailing;
-                        url = url.slice(0, -1);
-                        continue;
-                    }
-                }
-
-                break;
-            }
-
-            let href = url;
-
-            // www. → automatisch https:// davor
-            if (href.startsWith("www."))
-            {
-                href = "https://" + href;
-            }
-
-            return makeLink(href, url) + trailing;
-        }
-    );
-
-    return withLinks.replace(/\r?\n/g, "<br>");
-}
-
-function normalizeGuiTimestamp(timestamp)
-{
-    if (!timestamp || timestamp <= 0)
-    {
-        return 0;
-    }
-
-    // Wenn Zeit in der Zukunft liegt → auf 365 Tage in der Vergangenheit setzen
-    if (timestamp > Date.now())
-    {
-        return Date.now() - (365 * 24 * 60 * 60 * 1000);
-    }
-
-    return timestamp;
-}
 
 const CHAT_SYMBOL_GROUPS = [
     {
@@ -1098,16 +1070,6 @@ function setChatInputCaretOffset(offset)
     selection.removeAllRanges();
     selection.addRange(range);
 }
-function getTextCharacters(text)
-{
-    return Array.from(String(text || ""));
-}
-
-function limitTextCharacters(text, maxLength)
-{
-    return getTextCharacters(text).slice(0, maxLength).join("");
-}
-
 function isSelectionInsideChatInput(selection)
 {
     if (!selection || !selection.rangeCount || !el.chatInput)
@@ -1204,44 +1166,6 @@ function clearChatInput()
     el.chatInput.innerHTML = "";
 }
 
-function getLocale()
-{
-    const lang = getLanguage();
-
-    switch (lang)
-    {
-        case "de":
-            return "de-DE";
-        case "en":
-            return "en-GB";
-        case "es":
-            return "es-ES";
-        case "fr":
-            return "fr-FR";
-        case "it":
-            return "it-IT";
-        default:
-            return "de-DE";
-    }
-}
-
-function tr(key, fallback, vars = {})
-{
-    if (typeof t === "function")
-    {
-        return t(key, vars);
-    }
-
-    let text = fallback || key;
-
-    Object.keys(vars).forEach(function(name)
-    {
-        text = text.replaceAll("{" + name + "}", String(vars[name]));
-    });
-
-    return text;
-}
-
 function getSelectedChannel()
 {
     if (!state.chatRow || !isChannelRow(state.chatRow))
@@ -1321,11 +1245,6 @@ function closeChannelDialog()
         el.channelModalCancelButton.disabled = false;
         el.channelModalCancelButton.style.display = "";
     }
-}
-
-function buildMeshCoreChannelQrPayload(channelName, secret)
-{
-    return `meshcore://channel/add?name=${encodeURIComponent(channelName)}&secret=${encodeURIComponent(secret)}`;
 }
 
 function renderChannelQrCode(payload)
@@ -1496,71 +1415,6 @@ function showChannelDialogError(message)
     el.channelModalError.style.display = "block";
 }
 
-function escapeHtml(value)
-{
-    return String(value)
-        .replaceAll("&", "&amp;")
-        .replaceAll("<", "&lt;")
-        .replaceAll(">", "&gt;")
-        .replaceAll('"', "&quot;")
-        .replaceAll("'", "&#39;");
-}
-
-function isChatNode(row)
-{
-    return row && row.advert_type_label === "CHAT";
-}
-
-function isRoomNode(row)
-{
-    return row && row.advert_type_label === "ROOM";
-}
-
-function isChannelRow(row)
-{
-    return row && row.type === "channel";
-}
-
-function isChatLikeNode(row)
-{
-    return isChatNode(row) || isRoomNode(row) || isChannelRow(row);
-}
-
-function isRepeaterNode(row)
-{
-    return String(row?.advert_type_label || "").toUpperCase() === "REPEATER";
-}
-
-function getChatKindLabel(row)
-{
-    if (isRoomNode(row))
-    {
-        return tr("channel.type.room", "Room");
-    }
-
-    if (isChannelRow(row))
-    {
-        return tr("channel.type.channel", "Channel");
-    }
-
-    return tr("channel.type.chat", "Chat");
-}
-
-function getChatKindValue(row)
-{
-    if (isRoomNode(row))
-    {
-        return tr("channel.kind.room", "room");
-    }
-
-    if (isChannelRow(row))
-    {
-        return tr("channel.kind.channel", "channel");
-    }
-
-    return tr("channel.kind.dm", "dm");
-}
-
 function getMarkerIcon(row)
 {
     switch (row.advert_type_label)
@@ -1580,100 +1434,6 @@ function getMarkerIcon(row)
         default:
             return icons.chat;
     }
-}
-
-function parseMariaDbDateTime(value)
-{
-    if (!value || value === "0000-00-00 00:00:00")
-    {
-        return 0;
-    }
-
-    return new Date(value.replace(" ", "T")).getTime();
-}
-
-function formatDateTime(value)
-{
-    if (!value)
-    {
-        return "?";
-    }
-
-    const date = new Date(value.replace(" ", "T"));
-
-    if (Number.isNaN(date.getTime()))
-    {
-        return value;
-    }
-
-    return date.toLocaleString(getLocale());
-}
-
-function formatEpochDateTime(epochSeconds)
-{
-    const value = Number(epochSeconds || 0);
-
-    if (!Number.isFinite(value) || value <= 0)
-    {
-        return "-";
-    }
-
-    return new Date(value * 1000).toLocaleString(getLocale());
-}
-
-function containsPossibleCallsign(value)
-{
-    if (!value)
-    {
-        return false;
-    }
-
-    const text = String(value).toUpperCase();
-    const regex = /(^|[^A-Z0-9])([A-Z]{1,2}[0-9][A-Z]{1,3})(?=$|[^A-Z0-9])/;
-
-    return regex.test(text);
-}
-
-function getNodeLatLon(row)
-{
-    let lat = null;
-    let lon = null;
-
-    if (row.adv_lat !== null && row.adv_lat !== undefined)
-    {
-        lat = Number(row.adv_lat);
-    }
-    else if (row.adv_lat_e6 !== null && row.adv_lat_e6 !== undefined)
-    {
-        lat = Number(row.adv_lat_e6) / 1000000.0;
-    }
-
-    if (row.adv_lon !== null && row.adv_lon !== undefined)
-    {
-        lon = Number(row.adv_lon);
-    }
-    else if (row.adv_lon_e6 !== null && row.adv_lon_e6 !== undefined)
-    {
-        lon = Number(row.adv_lon_e6) / 1000000.0;
-    }
-
-    const valid =
-        Number.isFinite(lat) &&
-        Number.isFinite(lon) &&
-        lat !== 0 &&
-        lon !== 0;
-
-    if (!valid)
-    {
-        return null;
-    }
-
-    return { lat: lat, lon: lon };
-}
-
-function hasLocation(row)
-{
-    return getNodeLatLon(row) !== null;
 }
 
 function isRoomPasswordPromptSuppressed(roomNodeId)
@@ -1853,45 +1613,9 @@ function ensureMap()
     return state.leafletMap;
 }
 
-async function fetchJson(url, options = {})
-{
-    const response = await fetch(url, options);
-
-    let data = null;
-
-    try
-    {
-        data = await response.json();
-    }
-    catch (jsonError)
-    {
-        throw new Error(`HTTP ${response.status} (${tr("error.invalid_json", "keine gültige JSON-Antwort")})`);
-    }
-
-    if (!response.ok)
-    {
-        throw new Error(data?.error || `HTTP ${response.status}`);
-    }
-
-    if (!data || data.success === false)
-    {
-        throw new Error(data?.error || tr("error.unknown", "Unbekannter Fehler"));
-    }
-
-    return data;
-}
-
 async function loadCompanionRadioStatus()
 {
-    return await fetchJson("companion_radio_status.php",
-    {
-        method: "GET",
-        cache: "no-store",
-        headers:
-        {
-            "Accept": "application/json"
-        }
-    });
+    return await MeshCoreApi.loadCompanionRadioStatus();
 }
 
 const NOISE_FLOOR_CONFIG =
@@ -1986,39 +1710,17 @@ async function refreshNoiseFloor()
 
 async function startDiscover()
 {
-    return await fetchJson("discover_start.php",
-    {
-        method: "POST",
-        headers:
-        {
-            "Accept": "application/json"
-        }
-    });
+    return await MeshCoreApi.startDiscover();
 }
 
 async function loadDiscoverStatus()
 {
-    return await fetchJson("discover_status.php",
-    {
-        method: "GET",
-        cache: "no-store",
-        headers:
-        {
-            "Accept": "application/json"
-        }
-    });
+    return await MeshCoreApi.loadDiscoverStatus();
 }
 
 async function clearDiscoverRequest()
 {
-    return await fetchJson("discover_clear.php",
-    {
-        method: "POST",
-        headers:
-        {
-            "Accept": "application/json"
-        }
-    });
+    return await MeshCoreApi.clearDiscoverRequest();
 }
 
 function renderDiscoverResults(results)
@@ -2520,9 +2222,7 @@ async function showNodeAdvertPath(row)
         resetChatState();
         setChatInputEnabled(false);
 
-        const data = await fetchJson(
-            `node_path.php?node_id=${encodeURIComponent(row.id)}&_=${Date.now()}`
-        );
+        const data = await MeshCoreApi.loadNodePath(row.id);
 
         const endpoint = data.endpoint || null;
         const pathEntry = data.path || null;
@@ -2533,7 +2233,8 @@ async function showNodeAdvertPath(row)
             return;
         }
 
-        const resolvedPath = resolvePathGreedyFromEndpoint(pathEntry, endpoint);
+        const sourceNode = data.node || row || null;
+        const resolvedPath = resolvePathBestRoute(pathEntry, endpoint, sourceNode);
         const preferredPath = buildResolvedPathListEntry(resolvedPath, endpoint);
 
         preferredPath.source =
@@ -2655,11 +2356,13 @@ async function showNodeAdvertPath(row)
                     weight: 2
                 }).addTo(state.leafletMarkers);
 
-                if (state.chatPathShowDistances && fromPoint.distance_m !== null)
+                const segmentDistanceM = getPathSegmentDistanceMeters(fromPoint, toPoint);
+
+                if (state.chatPathShowDistances && segmentDistanceM !== null)
                 {
                     const midLat = (fromPoint.lat + toPoint.lat) / 2.0;
                     const midLon = (fromPoint.lon + toPoint.lon) / 2.0;
-                    const distanceKm = fromPoint.distance_m / 1000.0;
+                    const distanceKm = segmentDistanceM / 1000.0;
 
                     L.marker([midLat, midLon],
                     {
@@ -2944,79 +2647,6 @@ function advertTypeFormatter(cell)
     `;
 }
 
-function loadContactReadState()
-{
-    try
-    {
-        const raw = localStorage.getItem(CONTACT_READ_STORAGE_KEY);
-
-        if (!raw)
-        {
-            return {};
-        }
-
-        const parsed = JSON.parse(raw);
-
-        return parsed && typeof parsed === "object" ? parsed : {};
-    }
-    catch (err)
-    {
-        console.warn("Could not load contact read state:", err);
-        return {};
-    }
-}
-
-function saveContactReadState(readState)
-{
-    try
-    {
-        localStorage.setItem(CONTACT_READ_STORAGE_KEY, JSON.stringify(readState));
-    }
-    catch (err)
-    {
-        console.warn("Could not save contact read state:", err);
-    }
-}
-
-function getContactReadKey(row)
-{
-    return `${getChatKindValue(row)}:${String(row.name || "")}`;
-}
-
-function getContactLastReadEpoch(row)
-{
-    const readState = loadContactReadState();
-    const key = getContactReadKey(row);
-
-    return Number(readState[key] || 0);
-}
-
-function markContactAsRead(row)
-{
-    const key = getContactReadKey(row);
-
-    if (key === ":")
-    {
-        return;
-    }
-
-    const newestMessageEpoch = Number(row.newest_msg_epoch || 0);
-
-    if (!Number.isFinite(newestMessageEpoch) || newestMessageEpoch <= 0)
-    {
-        return;
-    }
-
-    const readState = loadContactReadState();
-
-    readState[key] = Math.max(
-        Number(readState[key] || 0),
-        newestMessageEpoch
-    );
-
-    saveContactReadState(readState);
-}
-
 function nameFormatter(cell)
 {
     const row = cell.getRow().getData();
@@ -3048,24 +2678,6 @@ function nameFormatter(cell)
             ${badge}
         </span>
     `;
-}
-
-function getOutgoingStatusClass(msg)
-{
-    const statusValue = Number(msg.status || 0);
-    const uiState = String(msg.ui_state || "");
-
-    if (uiState === "failed" || statusValue === 2)
-    {
-        return "error";
-    }
-
-    if (uiState === "confirmed" || statusValue === 1)
-    {
-        return "ok";
-    }
-
-    return "";
 }
 
 function renderOutgoingMessage(msg)
@@ -3101,20 +2713,6 @@ function renderOutgoingMessage(msg)
             <div class="chat-message-status ${statusClass}">${statusText}</div>
         </div>
     `;
-}
-
-function extractReplyNameFromMessage(msg)
-{
-    const rawText = String(msg.text || msg.message_text || "").trim();
-
-    const match = rawText.match(/^([^:\n]{1,40}):\s+/);
-
-    if (!match)
-    {
-        return "";
-    }
-
-    return match[1].trim();
 }
 
 function insertReplyMention(name)
@@ -3253,431 +2851,6 @@ function renderIncomingMessage(msg)
     `;
 }
  
-function hasValidCoords(node)
-{
-    if (!node)
-    {
-        return false;
-    }
-
-    const lat = Number(node.adv_lat_e6);
-    const lon = Number(node.adv_lon_e6);
-
-    return Number.isFinite(lat) &&
-        Number.isFinite(lon) &&
-        lat !== 0 &&
-        lon !== 0;
-}
-
-function hasValidEndpointCoords(endpoint)
-{
-    if (!endpoint)
-    {
-        return false;
-    }
-
-    const lat = Number(endpoint.latitude_e6);
-    const lon = Number(endpoint.longitude_e6);
-
-    return Number.isFinite(lat) &&
-        Number.isFinite(lon) &&
-        lat !== 0 &&
-        lon !== 0;
-}
-
-function e6ToDegrees(value)
-{
-    return Number(value) / 1000000.0;
-}
-
-function degToRad(value)
-{
-    return value * Math.PI / 180.0;
-}
-
-function distanceMeters(lat1E6, lon1E6, lat2E6, lon2E6)
-{
-    const lat1 = e6ToDegrees(lat1E6);
-    const lon1 = e6ToDegrees(lon1E6);
-    const lat2 = e6ToDegrees(lat2E6);
-    const lon2 = e6ToDegrees(lon2E6);
-
-    const earthRadiusMeters = 6371000.0;
-
-    const dLat = degToRad(lat2 - lat1);
-    const dLon = degToRad(lon2 - lon1);
-
-    const a =
-        Math.sin(dLat / 2.0) * Math.sin(dLat / 2.0) +
-        Math.cos(degToRad(lat1)) * Math.cos(degToRad(lat2)) *
-        Math.sin(dLon / 2.0) * Math.sin(dLon / 2.0);
-
-    const c = 2.0 * Math.atan2(Math.sqrt(a), Math.sqrt(1.0 - a));
-
-    return earthRadiusMeters * c;
-}
-
-function formatDistanceMeters(distance)
-{
-    if (!Number.isFinite(distance))
-    {
-        return "n/a";
-    }
-
-    if (distance < 1000.0)
-    {
-        return `${Math.round(distance)} m`;
-    }
-
-    return `${(distance / 1000.0).toFixed(2)} km`;
-}
-
-const MAX_AMBIGUOUS_HOP_NEIGHBOR_DISTANCE_M = 100000.0;
-
-function pruneImplausibleResolvedHops(resolvedFromBack, endpoint)
-{
-    const resolvedForward = resolvedFromBack.slice().reverse();
-
-    if (!Array.isArray(resolvedForward) || resolvedForward.length < 3)
-    {
-        return resolvedFromBack;
-    }
-
-    const endpointRef =
-    {
-        kind: "endpoint",
-        name: endpoint.name || "endpoint",
-        lat_e6: Number(endpoint.latitude_e6),
-        lon_e6: Number(endpoint.longitude_e6)
-    };
-
-    for (let index = 1; index < resolvedForward.length - 1; index += 1)
-    {
-        const currentHop = resolvedForward[index];
-        const prevHop = resolvedForward[index - 1];
-        const nextHop = resolvedForward[index + 1];
-
-        if (!currentHop || !currentHop.selected)
-        {
-            continue;
-        }
-
-        if (!prevHop || !prevHop.selected)
-        {
-            continue;
-        }
-
-        let nextRef = null;
-
-        if (nextHop && nextHop.selected)
-        {
-            nextRef =
-            {
-                lat_e6: Number(nextHop.selected.adv_lat_e6),
-                lon_e6: Number(nextHop.selected.adv_lon_e6)
-            };
-        }
-        else if (index === resolvedForward.length - 2)
-        {
-            nextRef = endpointRef;
-        }
-        else
-        {
-            continue;
-        }
-
-        const distanceBeforeM = distanceMeters(
-            Number(prevHop.selected.adv_lat_e6),
-            Number(prevHop.selected.adv_lon_e6),
-            Number(currentHop.selected.adv_lat_e6),
-            Number(currentHop.selected.adv_lon_e6)
-        );
-
-        const distanceAfterM = distanceMeters(
-            Number(currentHop.selected.adv_lat_e6),
-            Number(currentHop.selected.adv_lon_e6),
-            Number(nextRef.lat_e6),
-            Number(nextRef.lon_e6)
-        );
-
-        if (
-            Number.isFinite(distanceBeforeM) &&
-            Number.isFinite(distanceAfterM) &&
-            distanceBeforeM > MAX_AMBIGUOUS_HOP_NEIGHBOR_DISTANCE_M &&
-            distanceAfterM > MAX_AMBIGUOUS_HOP_NEIGHBOR_DISTANCE_M
-        )
-        {
-            currentHop.selected = null;
-            currentHop.note = "discarded_implausible_long_before_after";
-        }
-    }
-
-    return resolvedForward.reverse();
-}
-
-function resolvePathGreedyFromEndpoint(pathEntry, endpoint)
-{
-    let lastSelectedPrefix6Hex = "";
-
-    const result =
-    {
-        path_id: pathEntry.id,
-        created_at: pathEntry.created_at,
-        path_text: pathEntry.path_text,
-        hop_count: pathEntry.hop_count,
-        resolved: false,
-        resolved_fully: false,
-        resolved_partially: false,
-        resolution_mode: "unresolved",
-        resolved_hops: []
-    };
-
-    const hops = Array.isArray(pathEntry.hops) ? pathEntry.hops : [];
-
-    if (!hasValidEndpointCoords(endpoint))
-    {
-        result.resolution_mode = "missing_endpoint_coords";
-        return result;
-    }
-
-    let referencePoint =
-    {
-        kind: "endpoint",
-        name: endpoint.name || "endpoint",
-        lat_e6: Number(endpoint.latitude_e6),
-        lon_e6: Number(endpoint.longitude_e6)
-    };
-
-    const resolvedFromBack = [];
-
-    for (let hopIndex = hops.length - 1; hopIndex >= 0; hopIndex -= 1)
-    {
-        const hop = hops[hopIndex];
-        const matches = Array.isArray(hop.matches) ? hop.matches : [];
-
-        const matchesWithDistance = matches.map(function(match)
-        {
-            const candidate =
-            {
-                prefix6_hex: match.prefix6_hex || "",
-                name: match.name || "",
-                adv_lat_e6: match.adv_lat_e6,
-                adv_lon_e6: match.adv_lon_e6,
-                has_coords: hasValidCoords(match),
-                distance_m: null
-            };
-
-            if (candidate.has_coords)
-            {
-                candidate.distance_m = distanceMeters(
-                    referencePoint.lat_e6,
-                    referencePoint.lon_e6,
-                    candidate.adv_lat_e6,
-                    candidate.adv_lon_e6
-                );
-            }
-
-            return candidate;
-        });
-
-        let candidatesWithCoords = matchesWithDistance.filter(function(candidate)
-        {
-            return candidate.has_coords && Number.isFinite(candidate.distance_m);
-        });
-
-        const candidatesWithoutImmediateDuplicate = candidatesWithCoords.filter(function(candidate)
-        {
-            return (candidate.prefix6_hex || "") !== lastSelectedPrefix6Hex;
-        });
-
-        if (candidatesWithoutImmediateDuplicate.length > 0)
-        {
-            candidatesWithCoords = candidatesWithoutImmediateDuplicate;
-        }
-
-        if (candidatesWithCoords.length === 0)
-        {
-            resolvedFromBack.push(
-            {
-                hop_index: hopIndex,
-                token: hop.token,
-                token_len: hop.token_len,
-                original_match_count: hop.match_count,
-                selected: null,
-                all_candidates: matchesWithDistance,
-                note: "no_candidate_with_coords",
-                reference_used:
-                {
-                    kind: referencePoint.kind,
-                    name: referencePoint.name,
-                    lat_e6: referencePoint.lat_e6,
-                    lon_e6: referencePoint.lon_e6
-                }
-            });
-
-            result.resolution_mode = "partial_greedy_from_endpoint";
-            continue;
-        }
-
-        candidatesWithCoords.sort(function(a, b)
-        {
-            return a.distance_m - b.distance_m;
-        });
-
-        const selected = candidatesWithCoords[0];
-
-        resolvedFromBack.push(
-        {
-            hop_index: hopIndex,
-            token: hop.token,
-            token_len: hop.token_len,
-            original_match_count: hop.match_count,
-            selected: selected,
-            all_candidates: matchesWithDistance,
-            note: "selected_shortest_distance",
-            reference_used:
-            {
-                kind: referencePoint.kind,
-                name: referencePoint.name,
-                lat_e6: referencePoint.lat_e6,
-                lon_e6: referencePoint.lon_e6
-            }
-        });
-
-        lastSelectedPrefix6Hex = selected.prefix6_hex || "";
-
-        referencePoint =
-        {
-            kind: "node",
-            name: selected.name,
-            lat_e6: Number(selected.adv_lat_e6),
-            lon_e6: Number(selected.adv_lon_e6)
-        };
-    }
-
-    const prunedResolvedFromBack = pruneImplausibleResolvedHops(resolvedFromBack, endpoint);
-
-    const unresolvedCount = prunedResolvedFromBack.filter(function(hop)
-    {
-        return !hop.selected;
-    }).length;
-
-    result.resolved = (unresolvedCount === 0);
-    result.resolved_fully = (unresolvedCount === 0);
-    result.resolved_partially = (prunedResolvedFromBack.length > 0);
-    result.resolution_mode = (unresolvedCount === 0)
-        ? "greedy_from_endpoint"
-        : "partial_greedy_from_endpoint";
-    result.resolved_hops = prunedResolvedFromBack.reverse();
-
-    return result;
-}
-
-function buildResolvedPathListEntry(resolvedPath, endpoint)
-{
-    const resolvedHops = Array.isArray(resolvedPath.resolved_hops)
-        ? resolvedPath.resolved_hops
-        : [];
-
-    const normalizedHops = resolvedHops.map(function(hop)
-    {
-        const isResolved = !!hop.selected;
-
-        return {
-            hop_index: hop.hop_index,
-            token: hop.token || "",
-            token_len: Number(hop.token_len || 0),
-            original_match_count: Number(hop.original_match_count || 0),
-            resolved: isResolved,
-            note: hop.note || "",
-            node: isResolved
-                ? {
-                    prefix6_hex: hop.selected.prefix6_hex || "",
-                    name: hop.selected.name || "",
-                    adv_lat_e6: hop.selected.adv_lat_e6,
-                    adv_lon_e6: hop.selected.adv_lon_e6
-                }
-                : null,
-            reference: hop.reference_used
-                ? {
-                    kind: hop.reference_used.kind || "",
-                    name: hop.reference_used.name || "",
-                    lat_e6: hop.reference_used.lat_e6,
-                    lon_e6: hop.reference_used.lon_e6
-                }
-                : null,
-            distance_m: isResolved ? hop.selected.distance_m : null
-        };
-    });
-
-    return {
-        path_id: resolvedPath.path_id,
-        created_at: resolvedPath.created_at,
-        path_text: resolvedPath.path_text,
-        hop_count: Number(resolvedPath.hop_count || 0),
-        resolved: !!resolvedPath.resolved,
-        resolved_fully: !!resolvedPath.resolved_fully,
-        resolved_partially: !!resolvedPath.resolved_partially,
-        resolution_mode: resolvedPath.resolution_mode || "unresolved",
-        endpoint: endpoint
-            ? {
-                id: endpoint.id ?? null,
-                name: endpoint.name || "",
-                latitude_e6: endpoint.latitude_e6 ?? null,
-                longitude_e6: endpoint.longitude_e6 ?? null
-            }
-            : null,
-        hops: normalizedHops
-    };
-}
-
-function pathHasNoGaps(pathEntry)
-{
-    const hops = Array.isArray(pathEntry.hops) ? pathEntry.hops : [];
-
-    if (hops.length === 0)
-    {
-        return false;
-    }
-
-    return hops.every(function(hop)
-    {
-        return !!hop.resolved;
-    });
-}
-
-function selectPreferredResolvedPath(resolvedPathList)
-{
-    const paths = Array.isArray(resolvedPathList) ? resolvedPathList : [];
-
-    if (paths.length === 0)
-    {
-        return null;
-    }
-
-    const completePaths = paths.filter(function(pathEntry)
-    {
-        return pathHasNoGaps(pathEntry);
-    });
-
-    const candidatePaths = completePaths.length > 0 ? completePaths : paths;
-
-    let bestPath = candidatePaths[0];
-
-    for (let index = 1; index < candidatePaths.length; index += 1)
-    {
-        const currentPath = candidatePaths[index];
-        const bestHopCount = Number(bestPath.hop_count || 0);
-        const currentHopCount = Number(currentPath.hop_count || 0);
-
-        if (currentHopCount < bestHopCount)
-        {
-            bestPath = currentPath;
-        }
-    }
-
-    return bestPath;
-}
 
 function debugPrintPreferredResolvedPath(preferredPath)
 {
@@ -3700,15 +2873,6 @@ function debugPrintPreferredResolvedPath(preferredPath)
     {
         console.error("PreferredResolvedPath JSON stringify fehlgeschlagen:", error);
     }
-}
-
-function buildResolvedPathList(paths, endpoint)
-{
-    return paths.map(function(pathEntry)
-    {
-        const resolvedPath = resolvePathGreedyFromEndpoint(pathEntry, endpoint);
-        return buildResolvedPathListEntry(resolvedPath, endpoint);
-    });
 }
 
 function debugPrintResolvedPath(resolvedPath, endpoint)
@@ -3782,9 +2946,7 @@ async function handleMessagePathClick(correlationKey)
 
     try
     {
-        const data = await fetchJson(
-            `message_path.php?correlation_key=${encodeURIComponent(key)}&_=${Date.now()}`
-        );
+        const data = await MeshCoreApi.loadMessagePath(key);
 
         const paths = Array.isArray(data.paths) ? data.paths : [];
         const endpoint = data.endpoint || null;
@@ -3934,29 +3096,12 @@ async function loadChatMessages(row, keepScrollIfPossible = true)
     const oldScrollTop = el.chatBody.scrollTop;
     const oldScrollHeight = el.chatBody.scrollHeight;
 
-    let url = "";
-    if (chatKind === "channel")
+    const data = await MeshCoreApi.loadMessages(
     {
-        url =
-            `messages.php?kind=channel&channel_key_hex=${encodeURIComponent(String(row.key_hex || ""))}&_=${Date.now()}`;
-    }
-    else
-    {
-        url =
-            `messages.php?kind=${encodeURIComponent(chatKind)}&name=${encodeURIComponent(chatName)}&_=${Date.now()}`;
-    }
-
-    const data = await fetchJson(
-        url,
-        {
-            method: "GET",
-            cache: "no-store",
-            headers:
-            {
-                "Accept": "application/json"
-            }
-        }
-    );
+        kind: chatKind,
+        name: chatName,
+        channel_key_hex: row.key_hex || ""
+    });
 
     const messages = data.messages || [];
     const newestId = messages.length > 0 ? Number(messages[messages.length - 1].id || 0) : 0;
@@ -4063,16 +3208,7 @@ async function pollIncomingMessages()
 
     try
     {
-        const response = await fetch(`new_messages.php?after_id=${encodeURIComponent(state.lastIncomingMessageId)}`, {
-            cache: "no-store",
-        });
-
-        const data = await response.json();
-
-        if (!data.success)
-        {
-            throw new Error(data.error || "new_messages.php failed");
-        }
+        const data = await MeshCoreApi.loadNewMessages(state.lastIncomingMessageId);
 
         const messages = Array.isArray(data.messages) ? data.messages : [];
 
@@ -4376,21 +3512,7 @@ function openRoomPasswordDialog(context)
 
 async function saveRoomPassword(context, password)
 {
-    return await fetchJson("save_room_password.php",
-    {
-        method: "POST",
-        headers:
-        {
-            "Content-Type": "application/json",
-            "Accept": "application/json"
-        },
-        body: JSON.stringify(
-        {
-            room_node_id: context.roomNodeId,
-            room_name: context.roomName,
-            password: password
-        })
-    });
+    return await MeshCoreApi.saveRoomPassword(context, password);
 }
 
 async function handleRoomPasswordSave()
@@ -4503,14 +3625,7 @@ function startTxStatusPolling(txId)
     {
         try
         {
-            const data = await fetchJson(`tx_status.php?id=${encodeURIComponent(txId)}`,
-            {
-                method: "GET",
-                headers:
-                {
-                    "Accept": "application/json"
-                }
-            });
+            const data = await MeshCoreApi.loadTxStatus(txId);
 
             if (data.state === "room_password_required")
             {
@@ -4580,28 +3695,7 @@ async function sendFloodAdvert()
 
     try
     {
-        const response = await fetch("send_message.php",
-        {
-            method: "POST",
-            headers:
-            {
-                "Content-Type": "application/json",
-                "Accept": "application/json"
-            },
-            body: JSON.stringify(
-            {
-                tx_kind: 2,
-                message_text: "[flood advert]",
-                max_retries: 1
-            })
-        });
-
-        if (!response.ok)
-        {
-            throw new Error(`HTTP ${response.status}`);
-        }
-
-        const result = await response.json();
+        const result = await MeshCoreApi.sendFloodAdvert();
 
         if (!result.success)
         {
@@ -4648,79 +3742,6 @@ function setLeftTab(tabName)
     }
 
     updateLeftCounter();
-}
-
-function loadChannelReadState()
-{
-    try
-    {
-        const raw = localStorage.getItem(CHANNEL_READ_STORAGE_KEY);
-
-        if (!raw)
-        {
-            return {};
-        }
-
-        const parsed = JSON.parse(raw);
-
-        return parsed && typeof parsed === "object" ? parsed : {};
-    }
-    catch (err)
-    {
-        console.warn("Could not load channel read state:", err);
-        return {};
-    }
-}
-
-function saveChannelReadState(readState)
-{
-    try
-    {
-        localStorage.setItem(CHANNEL_READ_STORAGE_KEY, JSON.stringify(readState));
-    }
-    catch (err)
-    {
-        console.warn("Could not save channel read state:", err);
-    }
-}
-
-function getChannelReadKey(channel)
-{
-    return String(channel.key_hex || "").toUpperCase();
-}
-
-function getChannelLastReadEpoch(channel)
-{
-    const readState = loadChannelReadState();
-    const key = getChannelReadKey(channel);
-
-    return Number(readState[key] || 0);
-}
-
-function markChannelAsRead(channel)
-{
-    const key = getChannelReadKey(channel);
-
-    if (key === "")
-    {
-        return;
-    }
-
-    const newestMessageEpoch = Number(channel.newest_message_epoch || 0);
-
-    if (!Number.isFinite(newestMessageEpoch) || newestMessageEpoch <= 0)
-    {
-        return;
-    }
-
-    const readState = loadChannelReadState();
-
-    readState[key] = Math.max(
-        Number(readState[key] || 0),
-        newestMessageEpoch
-    );
-
-    saveChannelReadState(readState);
 }
 
 function renderChannelsList()
@@ -4869,15 +3890,7 @@ function renderChannelsList()
 
 async function loadChannels()
 {
-    const data = await fetchJson("channels.php",
-    {
-        method: "GET",
-        cache: "no-store",
-        headers:
-        {
-            "Accept": "application/json"
-        }
-    });
+    const data = await MeshCoreApi.loadChannels();
 
     state.channels = Array.isArray(data.channels) ? data.channels : [];
 
@@ -4933,16 +3946,7 @@ async function sendCurrentChatMessage()
     let sendSucceeded = false;
     try
     {
-        const data = await fetchJson("send_message.php",
-        {
-            method: "POST",
-            headers:
-            {
-                "Content-Type": "application/json",
-                "Accept": "application/json"
-            },
-            body: JSON.stringify(buildOutgoingPayload(state.chatRow, messageText))
-        });
+        const data = await MeshCoreApi.sendMessage(buildOutgoingPayload(state.chatRow, messageText));
 
         clearChatInput();
         await loadChatMessages(state.chatRow, false);
@@ -5019,16 +4023,7 @@ async function resendChatMessageById(messageId)
 
     try
     {
-        const data = await fetchJson("send_message.php",
-        {
-            method: "POST",
-            headers:
-            {
-                "Content-Type": "application/json",
-                "Accept": "application/json"
-            },
-            body: JSON.stringify(buildOutgoingPayload(state.chatRow, messageText))
-        });
+        const data = await MeshCoreApi.sendMessage(buildOutgoingPayload(state.chatRow, messageText));
 
         await loadChatMessages(state.chatRow, false);
 
@@ -5193,6 +4188,14 @@ table = new Tabulator("#nodesTable",
                 }
             }
 
+            //if (el.localFilter && el.localFilter.checked)
+            {
+                if (Number(node.is_local || 0) !== 1)
+                {
+                    return false;
+                }
+            }
+
             return true;
         });
     },
@@ -5207,33 +4210,12 @@ table = new Tabulator("#nodesTable",
 
 async function saveChannel(payload)
 {
-    return await fetchJson("save_channel.php",
-    {
-        method: "POST",
-        headers:
-        {
-            "Content-Type": "application/json",
-            "Accept": "application/json"
-        },
-        body: JSON.stringify(payload)
-    });
+    return await MeshCoreApi.saveChannel(payload);
 }
 
 async function deleteChannel(keyHex)
 {
-    return await fetchJson("delete_channel.php",
-    {
-        method: "POST",
-        headers:
-        {
-            "Content-Type": "application/json",
-            "Accept": "application/json"
-        },
-        body: JSON.stringify(
-        {
-            key_hex: String(keyHex || "")
-        })
-    });
+    return await MeshCoreApi.deleteChannel(keyHex);
 }
 
 function buildChannelDialogPayload()
@@ -5656,15 +4638,7 @@ function closeSetupDialog()
 
 async function loadCompanionSetup()
 {
-    return await fetchJson("companion_setup_read.php",
-    {
-        method: "GET",
-        cache: "no-store",
-        headers:
-        {
-            "Accept": "application/json"
-        }
-    });
+    return await MeshCoreApi.loadCompanionSetup();
 }
 
 async function applyCompanionSetup()
@@ -5697,39 +4671,18 @@ async function applyCompanionSetup()
         throw new Error(tr("setup.error.longitude_invalid", "Longitude ist ungültig."));
     }
 
-    return await fetchJson("companion_setup.php",
+    return await MeshCoreApi.applyCompanionSetup(
     {
-        method: "POST",
-        headers:
-        {
-            "Content-Type": "application/json",
-            "Accept": "application/json"
-        },
-        body: JSON.stringify(
-        {
-            name: name,
-            location_name: locationName,
-            latitude: latitude,
-            longitude: longitude
-        })
+        name: name,
+        location_name: locationName,
+        latitude: latitude,
+        longitude: longitude
     });
 }
 
 async function resetNodePath(publicKeyHex)
 {
-    return await fetchJson("reset_node_path.php",
-    {
-        method: "POST",
-        headers:
-        {
-            "Content-Type": "application/json",
-            "Accept": "application/json"
-        },
-        body: JSON.stringify(
-        {
-            public_key_hex: String(publicKeyHex || "")
-        })
-    });
+    return await MeshCoreApi.resetNodePath(publicKeyHex);
 }
 
 async function handleResetPathButtonClick()
@@ -5898,7 +4851,16 @@ if (el.activeFilter)
         table.replaceData();
     });
 }
-
+/*
+if (el.localFilter)
+{
+    el.localFilter.addEventListener("change", function()
+    {
+        el.tableError.innerHTML = "";
+        table.replaceData();
+    });
+}
+*/
 if (el.allMapButton)
 {
     el.allMapButton.addEventListener("click", function()
