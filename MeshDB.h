@@ -167,6 +167,8 @@ public:
         unsigned long long id = 0;
         std::string actionType;
         std::string publicKeyHex;
+        std::string targetName;
+        std::string resultJson;
     };
 
     static bool CreateDiscoverJob(
@@ -281,6 +283,7 @@ public:
 
     static std::optional<CompanionConfig> LoadCompanionConfig();
     static std::string GetCompanionLocationName();
+    static std::string GetProtectedRepeaterName();
     static bool MarkCompanionConfigApplied();
     static bool MarkCompanionConfigApplyFailed(const std::string& error);
     static bool UpdateDiscoverJobResultCount(
@@ -308,6 +311,9 @@ public:
     static std::optional<CompanionAction> FetchNextQueuedCompanionAction();
     static bool MarkCompanionActionRunning(unsigned long long id);
     static bool MarkCompanionActionDone(unsigned long long id);
+    static bool SetCompanionActionResult(
+        unsigned long long id,
+        const std::string& resultJson);
     static bool MarkCompanionActionFailed(
         unsigned long long id,
         const std::string& errorText);

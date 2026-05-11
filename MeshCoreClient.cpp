@@ -1977,6 +1977,193 @@ bool MeshCoreClient::syncClock()
     return setTime(nowUtcEpoch());
 }
 
+
+std::optional<std::string> MeshCoreClient::requestNeighboursRaw(const std::string& repeaterName)
+{
+    static constexpr uint8_t binaryReqTypeNeighbours = 0x00;
+    static constexpr uint8_t neighbourCount = 0xFF;
+    static constexpr uint32_t neighbourOffset = 0;
+    static constexpr uint8_t pubKeyPrefixLength = 0x04;
+
+    if (repeaterName.empty())
+    {
+        std::cerr << "[neighbours] empty repeater name\n";
+        return std::nullopt;
+    }
+
+    if (!isConnected())
+    {
+        std::cerr << "[neighbours] not connected\n";
+        return std::nullopt;
+    }
+
+    auto peersOpt = listPeers(std::nullopt);
+
+    if (!peersOpt.has_value())
+    {
+        std::cerr << "[neighbours] could not fetch contacts\n";
+        return std::nullopt;
+    }
+
+    std::optional<Peer> repeater;
+
+    for (const auto& peer : *peersOpt)
+    {
+        if (peer.name == repeaterName)
+        {
+            repeater = peer;
+            break;
+        }
+    }
+
+    if (!repeater.has_value())
+    {
+        std::cerr << "[neighbours] repeater not found: " << repeaterName << "\n";
+        return std::nullopt;
+    }
+
+    const uint32_t tag = static_cast<uint32_t>(
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count());
+
+    std::vector<uint8_t> requestData;
+    requestData.reserve(10);
+    requestData.push_back(binaryReqTypeNeighbours);
+    requestData.push_back(neighbourCount);
+    requestData.push_back(static_cast<uint8_t>(neighbourOffset & 0xFF));
+    requestData.push_back(static_cast<uint8_t>((neighbourOffset >> 8) & 0xFF));
+    requestData.push_back(static_cast<uint8_t>((neighbourOffset >> 16) & 0xFF));
+    requestData.push_back(pubKeyPrefixLength);
+    requestData.push_back(static_cast<uint8_t>(tag & 0xFF));
+    requestData.push_back(static_cast<uint8_t>((tag >> 8) & 0xFF));
+    requestData.push_back(static_cast<uint8_t>((tag >> 16) & 0xFF));
+    requestData.push_back(static_cast<uint8_t>((tag >> 24) & 0xFF));
+
+    std::vector<uint8_t> cmd;
+    cmd.reserve(1 + repeater->publicKey.size() + 1 + requestData.size());
+    cmd.push_back(MeshCoreProto::CMD_SEND_RAW_DATA);
+    cmd.insert(cmd.end(), repeater->publicKey.begin(), repeater->publicKey.end());
+    cmd.push_back(0x06);
+    cmd.insert(cmd.end(), requestData.begin(), requestData.end());
+
+    std::cout
+        << "[neighbours] requesting direct neighbours from "
+        << repeaterName
+        << "\n"
+        << "[neighbours] binary request data: "
+        << BytesToHex(requestData)
+        << "\n"
+        << "[neighbours] companion raw command: "
+        << BytesToHex(cmd)
+        << "\n";
+
+    std::optional<std::vector<uint8_t>> sentResp;
+    std::optional<std::vector<uint8_t>> resp;
+    uint32_t responseTag = 0;
+
+    {
+        std::lock_guard<std::mutex> apiLock(m_apiMutex);
+
+        sentResp = m_link.requestResponse(
+            cmd,
+            MeshCoreProto::RESP_CODE_SENT,
+            5000);
+
+        if (sentResp.has_value() && sentResp->size() >= 6)
+        {
+            responseTag = MeshCoreProto::le32(sentResp->data() + 2);
+
+            std::cout
+                << "[neighbours] sent ack/tag: 0x"
+                << std::hex
+                << std::setw(8)
+                << std::setfill('0')
+                << responseTag
+                << std::dec
+                << "\n";
+
+            resp = m_link.waitResponseMatching(
+                std::vector<uint8_t> { MeshCoreProto::PUSH_CODE_BINARY_RESPONSE },
+                [responseTag](const std::vector<uint8_t>& frame)
+                {
+                    if (frame.size() < 6)
+                    {
+                        return false;
+                    }
+
+                    return MeshCoreProto::le32(frame.data() + 2) == responseTag;
+                },
+                8000);
+        }
+    }
+
+    if (!sentResp.has_value() || sentResp->size() < 6)
+    {
+        std::cerr << "[neighbours] no sent ack response\n";
+        return std::nullopt;
+    }
+
+    if (!resp.has_value() || resp->size() < 6)
+    {
+        std::cerr << "[neighbours] no binary response for sent ack/tag 0x"
+                  << std::hex
+                  << std::setw(8)
+                  << std::setfill('0')
+                  << responseTag
+                  << std::dec
+                  << "\n";
+        return std::nullopt;
+    }
+
+    const std::vector<uint8_t>& frame = *resp;
+
+    if (frame[0] != MeshCoreProto::PUSH_CODE_BINARY_RESPONSE)
+    {
+        std::cerr
+            << "[neighbours] unexpected response code: 0x"
+            << std::hex
+            << std::setw(2)
+            << std::setfill('0')
+            << static_cast<unsigned>(frame[0])
+            << std::dec
+            << "\n";
+
+        return std::nullopt;
+    }
+
+    const uint32_t frameTag = MeshCoreProto::le32(frame.data() + 2);
+
+    if (frameTag != responseTag)
+    {
+        std::cerr
+            << "[neighbours] binary response tag mismatch: expected ack/tag 0x"
+            << std::hex
+            << std::setw(8)
+            << std::setfill('0')
+            << responseTag
+            << ", got 0x"
+            << std::setw(8)
+            << frameTag
+            << std::dec
+            << "\n";
+
+        return std::nullopt;
+    }
+
+    std::vector<uint8_t> responseData(frame.begin() + 6, frame.end());
+    const std::string responseHex = BytesToHex(responseData);
+
+    std::cout
+        << "[neighbours] binary response frame: "
+        << BytesToHex(frame)
+        << "\n"
+        << "[neighbours] binary response data: "
+        << responseHex
+        << "\n";
+
+    return responseHex;
+}
+
 bool MeshCoreClient::resetPath(const std::array<uint8_t, 32>& publicKey)
 {
     if (!isConnected())

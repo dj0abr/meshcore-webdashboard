@@ -44,6 +44,17 @@ public:
         const std::vector<uint8_t> &wantedCodes,
         int timeoutMs);
 
+    std::optional<std::vector<uint8_t>> requestResponseMatching(
+        const std::vector<uint8_t> &cmdPayload,
+        const std::vector<uint8_t> &wantedCodes,
+        const std::function<bool(const std::vector<uint8_t>&)> &matcher,
+        int timeoutMs);
+
+    std::optional<std::vector<uint8_t>> waitResponseMatching(
+        const std::vector<uint8_t> &wantedCodes,
+        const std::function<bool(const std::vector<uint8_t>&)> &matcher,
+        int timeoutMs);
+
 private:
     std::atomic<bool> m_running;
 
@@ -59,6 +70,7 @@ private:
     bool m_waiting;
     std::vector<uint8_t> m_wantedCodes;
     std::vector<uint8_t> m_lastResp;
+    std::function<bool(const std::vector<uint8_t>&)> m_responseMatcher;
 
     std::unique_ptr<IByteStream> m_stream;
     std::optional<MeshCoreFramer> m_framer;

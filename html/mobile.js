@@ -823,7 +823,7 @@
 
         const enabled = state.currentMapMode === "path" && state.currentMapPreferredPath;
         labelsButton.disabled = !enabled;
-        labelsButton.textContent = state.pathLabelsVisible ? tr("path.labels_on", "Beschriftung ein") : tr("path.labels_off", "Beschriftung aus");
+        labelsButton.textContent = state.pathLabelsVisible ? tr("path.labels_on", tr("path.labels_on", "Beschriftung ein")) : tr("path.labels_off", "Beschriftung aus");
         labelsButton.classList.toggle("active", Boolean(enabled && state.pathLabelsVisible));
     }
 
@@ -1074,13 +1074,13 @@
 
                     <label class="active-toggle ${state.contactFilters.activeOnly ? "active" : ""}">
                         <input type="checkbox" id="mobileActiveContactsOnly" ${state.contactFilters.activeOnly ? "checked" : ""}>
-                        <span>nur aktive</span>
+                        <span>${escapeHtml(tr("filter.active_only", "nur aktive"))}</span>
                         <strong>${Number(activeCount)}</strong>
                     </label>
 
                     <label class="active-toggle ${state.contactFilters.localOnly ? "active" : ""}">
                         <input type="checkbox" id="mobileLocalContactsOnly" ${state.contactFilters.localOnly ? "checked" : ""}>
-                        <span>Local</span>
+                        <span>${escapeHtml(tr("filter.local", "Local"))}</span>
                     </label>
                 </div>
             </section>
@@ -1112,8 +1112,8 @@
                         </div>
                         <div class="card-meta">
                             ${meta || escapeHtml(tr("mobile.no_meta", "Keine Details"))}
-                            ${activeContact ? `<span class="badge badge-active">aktiv</span>` : ""}
-                            ${unread ? `<span class="badge">neu</span>` : ""}
+                            ${activeContact ? `<span class="badge badge-active">${escapeHtml(tr("channel.enabled", "aktiv"))}</span>` : ""}
+                            ${unread ? `<span class="badge">${escapeHtml(tr("common.new", "neu"))}</span>` : ""}
                         </div>
                     </button>
                     <button type="button" class="contact-map-button" data-contact-map="${index}" aria-label="${escapeHtml(tr("map.show_position", "Position auf Karte anzeigen"))}">⌖</button>
@@ -2358,33 +2358,33 @@
             meter.dataset.state = stateLabel;
             fill.className = `mobile-noise-floor-fill ${stateLabel}`;
             fill.style.width = `${percent}%`;
-            noiseText.textContent = `noise: ${Math.round(noiseFloor)}dBm`;
+            noiseText.textContent = `${tr("radio.noise_short", "noise")}: ${Math.round(noiseFloor)}dBm`;
             meter.title =
-                `Noise floor: ${noiseFloor.toFixed(1)} dBm` +
-                (updatedAt ? `\nUpdate: ${updatedAt}` : "");
+                `${tr("radio.noise_floor", "Noise floor")}: ${noiseFloor.toFixed(1)} dBm` +
+                (updatedAt ? `\n${tr("common.update", "Update")}: ${updatedAt}` : "");
         }
         else
         {
             meter.classList.remove("has-value");
             fill.className = "mobile-noise-floor-fill";
             fill.style.width = "0%";
-            noiseText.textContent = "noise: --";
-            meter.title = "Noise floor: kein Wert";
+            noiseText.textContent = `${tr("radio.noise_short", "noise")}: --`;
+            meter.title = tr("radio.noise_no_value", "Noise floor: kein Wert");
         }
 
         if (Number.isFinite(batteryMv))
         {
             const voltage = batteryMv / 1000.0;
             const voltageText = voltage.toFixed(3).replace(".", ",");
-            batteryText.textContent = `Batt: ${voltageText} V`;
+            batteryText.textContent = `${tr("radio.battery_short", "Batt")}: ${voltageText} V`;
             batteryText.title =
-                `Battery: ${voltage.toFixed(3)} V` +
-                (updatedAt ? `\nUpdate: ${updatedAt}` : "");
+                `${tr("radio.battery", "Battery")}: ${voltage.toFixed(3)} V` +
+                (updatedAt ? `\n${tr("common.update", "Update")}: ${updatedAt}` : "");
         }
         else
         {
-            batteryText.textContent = "Batt: --";
-            batteryText.title = "Battery: kein Wert";
+            batteryText.textContent = `${tr("radio.battery_short", "Batt")}: --`;
+            batteryText.title = tr("radio.battery_no_value", "Battery: kein Wert");
         }
 
         if (connected)
@@ -2392,16 +2392,16 @@
             led.classList.remove("offline");
             led.classList.add("online");
             led.title =
-                "Companion: verbunden" +
-                (updatedAt ? `\nUpdate: ${updatedAt}` : "");
+                tr("radio.companion_connected", "Companion: verbunden") +
+                (updatedAt ? `\n${tr("common.update", "Update")}: ${updatedAt}` : "");
         }
         else
         {
             led.classList.remove("online");
             led.classList.add("offline");
             led.title =
-                "Companion: nicht verbunden" +
-                (updatedAt ? `\nLetztes Update: ${updatedAt}` : "");
+                tr("radio.companion_disconnected", "Companion: nicht verbunden") +
+                (updatedAt ? `\n${tr("common.last_update", "Letztes Update")}: ${updatedAt}` : "");
         }
     }
 
@@ -2436,17 +2436,17 @@
         showNav(true);
         destroyMobileMap();
         setNavActive("info");
-        setTitle("MeshCore", "Mobile");
+        setTitle("MeshCore", tr("mobile.subtitle", "Mobile"));
 
         el.view.innerHTML = `
             <div class="mobile-radio-status-card">
-                <div id="mobileNoiseFloorMeter" class="mobile-noise-floor-meter" title="Noise floor">
+                <div id="mobileNoiseFloorMeter" class="mobile-noise-floor-meter" title="${escapeHtml(tr("radio.noise_floor", "Noise floor"))}">
                     <div class="mobile-noise-floor-track" aria-hidden="true">
                         <div id="mobileNoiseFloorFill" class="mobile-noise-floor-fill"></div>
                     </div>
-                    <div id="mobileNoiseFloorText" class="mobile-noise-floor-text">noise: --</div>
-                    <div id="mobileBatteryVoltageText" class="mobile-battery-voltage-text">Batt: --</div>
-                    <div class="mobile-companion-link-status" title="Companion connection">
+                    <div id="mobileNoiseFloorText" class="mobile-noise-floor-text">${escapeHtml(tr("radio.noise_short", "noise"))}: --</div>
+                    <div id="mobileBatteryVoltageText" class="mobile-battery-voltage-text">${escapeHtml(tr("radio.battery_short", "Batt"))}: --</div>
+                    <div class="mobile-companion-link-status" title="${escapeHtml(tr("radio.companion_connection", "Companion connection"))}">
                         <span id="mobileCompanionLinkLed" class="mobile-companion-link-led offline"></span>
                     </div>
                 </div>
@@ -2982,7 +2982,7 @@
         }
         catch (error)
         {
-            alert("Advert senden fehlgeschlagen: " + (error.message || "Unbekannter Fehler"));
+            alert(tr("advert.send_failed", "Advert senden fehlgeschlagen: {message}", { message: (error.message || tr("common.unknown_error", "Unbekannter Fehler")) }));
         }
         finally
         {

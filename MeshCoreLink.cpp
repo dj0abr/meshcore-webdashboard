@@ -137,6 +137,15 @@ std::optional<std::vector<uint8_t>> MeshCoreLink::requestResponseAny(
     const std::vector<uint8_t> &wantedCodes,
     int timeoutMs)
 {
+    return requestResponseMatching(cmdPayload, wantedCodes, nullptr, timeoutMs);
+}
+
+std::optional<std::vector<uint8_t>> MeshCoreLink::requestResponseMatching(
+    const std::vector<uint8_t> &cmdPayload,
+    const std::vector<uint8_t> &wantedCodes,
+    const std::function<bool(const std::vector<uint8_t>&)> &matcher,
+    int timeoutMs)
+{
     if (!isRunning() || !m_framer.has_value())
     {
         return std::nullopt;
@@ -156,6 +165,7 @@ std::optional<std::vector<uint8_t>> MeshCoreLink::requestResponseAny(
 
     m_waiting = true;
     m_wantedCodes = wantedCodes;
+    m_responseMatcher = matcher;
     m_lastResp.clear();
 
     lock.unlock();
@@ -165,6 +175,7 @@ std::optional<std::vector<uint8_t>> MeshCoreLink::requestResponseAny(
         std::lock_guard<std::mutex> g(m_reqMutex);
         m_waiting = false;
         m_wantedCodes.clear();
+        m_responseMatcher = nullptr;
         return std::nullopt;
     }
 
@@ -182,6 +193,54 @@ std::optional<std::vector<uint8_t>> MeshCoreLink::requestResponseAny(
 
     m_waiting = false;
     m_wantedCodes.clear();
+    m_responseMatcher = nullptr;
+
+    if (!ok)
+    {
+        m_lastResp.clear();
+        return std::nullopt;
+    }
+
+    auto out = m_lastResp;
+    m_lastResp.clear();
+    return out;
+}
+
+std::optional<std::vector<uint8_t>> MeshCoreLink::waitResponseMatching(
+    const std::vector<uint8_t> &wantedCodes,
+    const std::function<bool(const std::vector<uint8_t>&)> &matcher,
+    int timeoutMs)
+{
+    if (!isRunning() || wantedCodes.empty())
+    {
+        return std::nullopt;
+    }
+
+    std::unique_lock<std::mutex> lock(m_reqMutex);
+
+    if (m_waiting)
+    {
+        return std::nullopt;
+    }
+
+    m_waiting = true;
+    m_wantedCodes = wantedCodes;
+    m_responseMatcher = matcher;
+    m_lastResp.clear();
+
+    bool ok = m_reqCv.wait_for(lock, std::chrono::milliseconds(timeoutMs), [&]()
+    {
+        if (m_lastResp.empty())
+        {
+            return false;
+        }
+
+        return containsCode(m_wantedCodes, m_lastResp[0]);
+    });
+
+    m_waiting = false;
+    m_wantedCodes.clear();
+    m_responseMatcher = nullptr;
 
     if (!ok)
     {
@@ -227,9 +286,19 @@ void MeshCoreLink::rxLoop()
 
             if (m_waiting && containsCode(m_wantedCodes, code))
             {
-                m_lastResp = *frame;
-                m_reqCv.notify_all();
-                continue;
+                bool matches = true;
+
+                if (m_responseMatcher)
+                {
+                    matches = m_responseMatcher(*frame);
+                }
+
+                if (matches)
+                {
+                    m_lastResp = *frame;
+                    m_reqCv.notify_all();
+                    continue;
+                }
             }
 
             // Sonderfall listPeers: wanted=RESP_CODE_CONTACT, aber END soll auch erfüllen

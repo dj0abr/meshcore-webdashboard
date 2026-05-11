@@ -553,6 +553,7 @@ bool MeshDB::EnsureSchema()
             "    latitude_e6 INT NOT NULL,"
             "    longitude_e6 INT NOT NULL,"
             "    location_name VARCHAR(128) DEFAULT NULL,"
+            "    protected_repeater_name VARCHAR(64) DEFAULT NULL,"
             "    radio_bw_hz INT UNSIGNED NOT NULL,"
             "    radio_sf TINYINT UNSIGNED NOT NULL,"
             "    radio_cr TINYINT UNSIGNED NOT NULL,"
@@ -645,8 +646,10 @@ bool MeshDB::EnsureSchema()
         "    processed_at DATETIME DEFAULT NULL,"
         "    action_type VARCHAR(32) NOT NULL,"
         "    public_key_hex CHAR(64) DEFAULT NULL,"
+        "    target_name VARCHAR(64) DEFAULT NULL,"
         "    status TINYINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '0=queued,1=running,2=failed,3=done',"
         "    error_text VARCHAR(255) DEFAULT NULL,"
+        "    result_json JSON DEFAULT NULL,"
         "    PRIMARY KEY (id),"
         "    KEY idx_companion_actions_status_created (status, created_at),"
         "    KEY idx_companion_actions_action_type (action_type),"
@@ -824,7 +827,7 @@ bool MeshDB::UpsertRepeaterNodeFromAdvert(const DataConnector::AdvertInfo& info)
 
     oss
         << "INSERT INTO repeaternodes ("
-        << "node_id, advert_type, advert_flags, name, public_key_hex, prefix6_hex, last_advert_at, first_seen_at, adv_lat_e6, adv_lon_e6"
+        << "node_id, advert_type, advert_flags, name, public_key_hex, prefix6_hex, last_advert_at, first_seen_at, adv_lat_e6, adv_lon_e6, is_local"
         << ") VALUES ("
         << info.nodeId << ", "
         << unsigned(info.type) << ", "
@@ -843,6 +846,7 @@ bool MeshDB::UpsertRepeaterNodeFromAdvert(const DataConnector::AdvertInfo& info)
     {
         oss << "NULL, NULL";
     }
+    oss << ", 1";
 
     oss
         << ") ON DUPLICATE KEY UPDATE "
@@ -855,6 +859,7 @@ bool MeshDB::UpsertRepeaterNodeFromAdvert(const DataConnector::AdvertInfo& info)
         << "last_advert_at=IF(VALUES(last_advert_at) >= COALESCE(last_advert_at, '1970-01-01 00:00:00'), VALUES(last_advert_at), last_advert_at), "
         << "adv_lat_e6=IF(VALUES(last_advert_at) >= COALESCE(last_advert_at, '1970-01-01 00:00:00'), COALESCE(VALUES(adv_lat_e6), adv_lat_e6), adv_lat_e6), "
         << "adv_lon_e6=IF(VALUES(last_advert_at) >= COALESCE(last_advert_at, '1970-01-01 00:00:00'), COALESCE(VALUES(adv_lon_e6), adv_lon_e6), adv_lon_e6), "
+        << "is_local=1, "
         << "updated_at=CURRENT_TIMESTAMP";
 
     return Execute(oss.str());
@@ -959,7 +964,7 @@ bool MeshDB::UpsertRepeaterNodeFromPushNewAdvert(const DataConnector::PushNewAdv
 
     oss
         << "INSERT INTO repeaternodes ("
-        << "node_id, advert_type, advert_flags, name, public_key_hex, prefix6_hex, last_advert_at, last_mod_at, first_seen_at, adv_lat_e6, adv_lon_e6"
+        << "node_id, advert_type, advert_flags, name, public_key_hex, prefix6_hex, last_advert_at, last_mod_at, first_seen_at, adv_lat_e6, adv_lon_e6, is_local"
         << ") VALUES ("
         << info.nodeId << ", "
         << unsigned(info.type) << ", "
@@ -979,6 +984,7 @@ bool MeshDB::UpsertRepeaterNodeFromPushNewAdvert(const DataConnector::PushNewAdv
     {
         oss << "NULL, NULL";
     }
+    oss << ", 1";
 
     oss
         << ") ON DUPLICATE KEY UPDATE "
@@ -992,6 +998,7 @@ bool MeshDB::UpsertRepeaterNodeFromPushNewAdvert(const DataConnector::PushNewAdv
         << "last_mod_at=IF(VALUES(last_mod_at) >= COALESCE(last_mod_at, '1970-01-01 00:00:00'), VALUES(last_mod_at), last_mod_at), "
         << "adv_lat_e6=IF(VALUES(last_advert_at) >= COALESCE(last_advert_at, '1970-01-01 00:00:00'), COALESCE(VALUES(adv_lat_e6), adv_lat_e6), adv_lat_e6), "
         << "adv_lon_e6=IF(VALUES(last_advert_at) >= COALESCE(last_advert_at, '1970-01-01 00:00:00'), COALESCE(VALUES(adv_lon_e6), adv_lon_e6), adv_lon_e6), "
+        << "is_local=1, "
         << "updated_at=CURRENT_TIMESTAMP";
 
     return Execute(oss.str());
@@ -2391,6 +2398,48 @@ std::string MeshDB::GetCompanionLocationName()
     return locationName;
 }
 
+std::string MeshDB::GetProtectedRepeaterName()
+{
+    std::lock_guard<std::mutex> lock(s_mutex);
+
+    if (!s_ready || (s_conn == nullptr))
+    {
+        return "";
+    }
+
+    const char* sql =
+        "SELECT protected_repeater_name "
+        "FROM companion_config "
+        "WHERE id = 1 "
+        "LIMIT 1";
+
+    if (mysql_query(s_conn, sql) != 0)
+    {
+        std::cerr << "MeshDB SQL error: " << mysql_error(s_conn) << "\n";
+        return "";
+    }
+
+    MYSQL_RES* res = mysql_store_result(s_conn);
+
+    if (res == nullptr)
+    {
+        return "";
+    }
+
+    MYSQL_ROW row = mysql_fetch_row(res);
+
+    if (row == nullptr)
+    {
+        mysql_free_result(res);
+        return "";
+    }
+
+    std::string repeaterName = RowStr(row, 0);
+
+    mysql_free_result(res);
+    return repeaterName;
+}
+
 bool MeshDB::MarkCompanionConfigApplied()
 {
     std::lock_guard<std::mutex> lock(s_mutex);
@@ -3220,7 +3269,7 @@ std::optional<MeshDB::CompanionAction> MeshDB::FetchNextQueuedCompanionAction()
 
     std::ostringstream oss;
     oss
-        << "SELECT id, action_type, IFNULL(public_key_hex, '') "
+        << "SELECT id, action_type, IFNULL(public_key_hex, ''), IFNULL(target_name, ''), IFNULL(result_json, '') "
         << "FROM companion_actions "
         << "WHERE status = " << static_cast<unsigned>(CompanionActionStatus::Queued) << " "
         << "ORDER BY created_at ASC, id ASC "
@@ -3250,6 +3299,8 @@ std::optional<MeshDB::CompanionAction> MeshDB::FetchNextQueuedCompanionAction()
     action.id = row[0] ? std::strtoull(row[0], nullptr, 10) : 0;
     action.actionType = row[1] ? row[1] : "";
     action.publicKeyHex = row[2] ? row[2] : "";
+    action.targetName = row[3] ? row[3] : "";
+    action.resultJson = row[4] ? row[4] : "";
 
     mysql_free_result(result);
     return action;
@@ -3295,6 +3346,26 @@ bool MeshDB::MarkCompanionActionDone(unsigned long long id)
         << "SET status = " << static_cast<unsigned>(CompanionActionStatus::Done) << ", "
         << "    error_text = NULL, "
         << "    processed_at = CURRENT_TIMESTAMP "
+        << "WHERE id = " << id;
+
+    return mysql_query(s_conn, oss.str().c_str()) == 0;
+}
+
+bool MeshDB::SetCompanionActionResult(
+    unsigned long long id,
+    const std::string& resultJson)
+{
+    std::lock_guard<std::mutex> lock(s_mutex);
+
+    if (!s_ready || s_conn == nullptr)
+    {
+        return false;
+    }
+
+    std::ostringstream oss;
+    oss
+        << "UPDATE companion_actions "
+        << "SET result_json = " << ToSqlNullableString(resultJson) << " "
         << "WHERE id = " << id;
 
     return mysql_query(s_conn, oss.str().c_str()) == 0;
@@ -3487,7 +3558,7 @@ bool MeshDB::UpdateNodeAdvertPathFromRxLog(const DataConnector::PushRxLogInfo& i
         std::ostringstream nodeSql;
 
         nodeSql
-            << "INSERT IGNORE INTO repeaternodes ("
+            << "INSERT INTO repeaternodes ("
             << "advert_type, advert_flags, name, public_key_hex, prefix6_hex, "
             << "adv_lat_e6, adv_lon_e6, last_advert_at, first_seen_at, is_local"
             << ") VALUES ("
@@ -3523,7 +3594,10 @@ bool MeshDB::UpdateNodeAdvertPathFromRxLog(const DataConnector::PushRxLogInfo& i
             << (info.hasAdvertTimestamp ? ToSqlDateTimeFromU32(info.advertTimestamp) : "NULL")
             << ", CURRENT_TIMESTAMP), "
             << "1"
-            << ")";
+            << ")"
+            << " ON DUPLICATE KEY UPDATE "
+            << "is_local=1, "
+            << "updated_at=CURRENT_TIMESTAMP";
 
         if (!Execute(nodeSql.str()))
         {
@@ -3695,12 +3769,6 @@ bool MeshDB::InsertMissingRepeaterNodesFromSync(
             continue;
         }
 
-printf(
-    "[RepeaterSync] %s: %s\n",
-    inserted ? "INSERTED" : "EXISTS",
-    node.publicKeyHex.c_str()
-);        
-
         std::ostringstream oss;
 
         oss
@@ -3776,6 +3844,12 @@ printf(
                 (*ignored)++;
             }
         }
+
+        printf(
+            "[RepeaterSync] %s: %s\n",
+            affected > 0 ? "INSERTED" : "EXISTS",
+            node.publicKeyHex.c_str()
+        );
     }
 
     if (ok)

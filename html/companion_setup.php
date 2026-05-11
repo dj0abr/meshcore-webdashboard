@@ -25,6 +25,7 @@ try
 
     $name = trim((string) ($data['name'] ?? ''));
     $locationName = trim((string) ($data['location_name'] ?? ''));
+    $protectedRepeaterName = trim((string) ($data['protected_repeater_name'] ?? ''));
     $latitude = (float) ($data['latitude'] ?? 0.0);
     $longitude = (float) ($data['longitude'] ?? 0.0);
 
@@ -43,7 +44,13 @@ try
         throw new RuntimeException('City ist zu lang.');
     }
 
+    if (mb_strlen($protectedRepeaterName, 'UTF-8') > 64)
+    {
+        throw new RuntimeException('Home Repeater ist zu lang.');
+    }
+
     $locationNameDb = $locationName !== '' ? $locationName : null;
+    $protectedRepeaterNameDb = $protectedRepeaterName !== '' ? $protectedRepeaterName : null;
 
     if ($latitude < -90.0 || $latitude > 90.0)
     {
@@ -77,6 +84,7 @@ try
             latitude_e6,
             longitude_e6,
             location_name,
+            protected_repeater_name,
             radio_bw_hz,
             radio_sf,
             radio_cr,
@@ -86,6 +94,7 @@ try
         VALUES
         (
             1,
+            ?,
             ?,
             ?,
             ?,
@@ -101,6 +110,7 @@ try
             latitude_e6 = VALUES(latitude_e6),
             longitude_e6 = VALUES(longitude_e6),
             location_name = VALUES(location_name),
+            protected_repeater_name = VALUES(protected_repeater_name),
             radio_bw_hz = VALUES(radio_bw_hz),
             radio_sf = VALUES(radio_sf),
             radio_cr = VALUES(radio_cr),
@@ -109,7 +119,7 @@ try
     ";
 
     $stmt = $db->prepare($sql);
-    $stmt->bind_param('siis', $name, $latitudeE6, $longitudeE6, $locationNameDb);
+    $stmt->bind_param('siiss', $name, $latitudeE6, $longitudeE6, $locationNameDb, $protectedRepeaterNameDb);
     $stmt->execute();
     $stmt->close();
 

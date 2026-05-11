@@ -201,6 +201,14 @@ const el =
     channelQrGroup: document.getElementById("channelQrGroup"),
     channelQrCode: document.getElementById("channelQrCode"),
     discoverButton: document.getElementById("discoverButton"),
+    protectedRepeaterButton: document.getElementById("protectedRepeaterButton"),
+    protectedRepeaterModal: document.getElementById("protectedRepeaterModal"),
+    protectedRepeaterStatusText: document.getElementById("protectedRepeaterStatusText"),
+    protectedRepeaterNameInput: document.getElementById("protectedRepeaterNameInput"),
+    protectedRepeaterResult: document.getElementById("protectedRepeaterResult"),
+    protectedRepeaterStartButton: document.getElementById("protectedRepeaterStartButton"),
+    protectedRepeaterCloseButton: document.getElementById("protectedRepeaterCloseButton"),
+    protectedRepeaterModalError: document.getElementById("protectedRepeaterModalError"),
     discoverModal: document.getElementById("discoverModal"),
     discoverStatusText: document.getElementById("discoverStatusText"),
     discoverJobInfo: document.getElementById("discoverJobInfo"),
@@ -265,6 +273,10 @@ const state =
     discoverModalOpen: false,
     discoverPending: false,
     discoverPendingJobId: null,
+    protectedRepeaterPollTimer: null,
+    protectedRepeaterModalOpen: false,
+    protectedRepeaterPending: false,
+    protectedRepeaterActionId: null,
     rightTab: "messages",
     rightPanelMode: "messages",
     mapContextRow: null,
@@ -373,7 +385,7 @@ function showRepeaterInfo(row)
 
     const positionText = pos
         ? `${pos.lat.toFixed(6)}, ${pos.lon.toFixed(6)}`
-        : "keine Positionsdaten verfügbar.";
+        : tr("map.no_position_for_node", "keine Positionsdaten verfügbar.");
 
     if (el.mapEmpty)
     {
@@ -384,16 +396,16 @@ function showRepeaterInfo(row)
                 </div>
 
                 <div style="display:grid; grid-template-columns:max-content 1fr; gap:8px 14px; align-items:start;">
-                    <strong>Typ</strong><span>${escapeHtml(row.advert_type_label || "REPEATER")}</span>
-                    <strong>Node-ID</strong><span>${escapeHtml(nodeIdText)}</span>
-                    <strong>Prefix6</strong><span>${escapeHtml(prefix6Text)}</span>
-                    <strong>Public Key</strong><span style="word-break:break-all;">${escapeHtml(publicKeyText)}</span>
-                    <strong>Letztes Advert</strong><span>${escapeHtml(lastAdvertText)}</span>
-                    <strong>Erstmals gesehen</strong><span>${escapeHtml(firstSeenText)}</span>
-                    <strong>Zuletzt aktualisiert</strong><span>${escapeHtml(updatedAtText)}</span>
-                    <strong>Last Mod</strong><span>${escapeHtml(lastModText)}</span>
-                    <strong>Advert Flags</strong><span>${escapeHtml(advertFlagsText)}</span>
-                    <strong>Position</strong><span>${escapeHtml(positionText)}</span>
+                    <strong>${escapeHtml(tr("toolbar.type_short", "Typ"))}</strong><span>${escapeHtml(row.advert_type_label || "REPEATER")}</span>
+                    <strong>${escapeHtml(tr("node.id", "Node-ID"))}</strong><span>${escapeHtml(nodeIdText)}</span>
+                    <strong>${escapeHtml(tr("node.prefix6", "Prefix6"))}</strong><span>${escapeHtml(prefix6Text)}</span>
+                    <strong>${escapeHtml(tr("node.public_key", "Public Key"))}</strong><span style="word-break:break-all;">${escapeHtml(publicKeyText)}</span>
+                    <strong>${escapeHtml(tr("repeater.last_advert", "Letztes Advert"))}</strong><span>${escapeHtml(lastAdvertText)}</span>
+                    <strong>${escapeHtml(tr("repeater.first_seen", "Erstmals gesehen"))}</strong><span>${escapeHtml(firstSeenText)}</span>
+                    <strong>${escapeHtml(tr("repeater.updated_at", "Zuletzt aktualisiert"))}</strong><span>${escapeHtml(updatedAtText)}</span>
+                    <strong>${escapeHtml(tr("repeater.last_mod", "Last Mod"))}</strong><span>${escapeHtml(lastModText)}</span>
+                    <strong>${escapeHtml(tr("repeater.advert_flags", "Advert Flags"))}</strong><span>${escapeHtml(advertFlagsText)}</span>
+                    <strong>${escapeHtml(tr("map.position", "Position"))}</strong><span>${escapeHtml(positionText)}</span>
                 </div>
             </div>
         `;
@@ -413,8 +425,8 @@ function renderBatteryVoltage(batteryMv, updatedAt)
 
     if (!Number.isFinite(batteryMv))
     {
-        el.batteryVoltageText.textContent = "Batt: --";
-        el.batteryVoltageText.title = "Battery: kein Wert";
+        el.batteryVoltageText.textContent = `${tr("radio.battery_short", "Batt")}: --`;
+        el.batteryVoltageText.title = tr("radio.battery_no_value", "Battery: kein Wert");
 
         return;
     }
@@ -422,10 +434,10 @@ function renderBatteryVoltage(batteryMv, updatedAt)
     const voltage = batteryMv / 1000.0;
     const voltageText = voltage.toFixed(3).replace(".", ",");
 
-    el.batteryVoltageText.textContent = `Batt: ${voltageText} V`;
+    el.batteryVoltageText.textContent = `${tr("radio.battery_short", "Batt")}: ${voltageText} V`;
     el.batteryVoltageText.title =
-        `Battery: ${voltage.toFixed(3)} V` +
-        (updatedAt ? `\nUpdate: ${updatedAt}` : "");
+        `${tr("radio.battery", "Battery")}: ${voltage.toFixed(3)} V` +
+        (updatedAt ? `\n${tr("common.update", "Update")}: ${updatedAt}` : "");
 }
 
 function renderCompanionLinkStatus(connected, updatedAt)
@@ -440,16 +452,16 @@ function renderCompanionLinkStatus(connected, updatedAt)
         el.companionLinkLed.classList.remove("offline");
         el.companionLinkLed.classList.add("online");
         el.companionLinkLed.title =
-            "Companion: verbunden" +
-            (updatedAt ? `\nUpdate: ${updatedAt}` : "");
+            tr("radio.companion_connected", "Companion: verbunden") +
+            (updatedAt ? `\n${tr("common.update", "Update")}: ${updatedAt}` : "");
     }
     else
     {
         el.companionLinkLed.classList.remove("online");
         el.companionLinkLed.classList.add("offline");
         el.companionLinkLed.title =
-            "Companion: nicht verbunden" +
-            (updatedAt ? `\nLetztes Update: ${updatedAt}` : "");
+            tr("radio.companion_disconnected", "Companion: nicht verbunden") +
+            (updatedAt ? `\n${tr("common.last_update", "Letztes Update")}: ${updatedAt}` : "");
     }
 }
 
@@ -883,27 +895,27 @@ const resolvedPathsByCorrelationKey = {};
 
 const CHAT_SYMBOL_GROUPS = [
     {
-        title: "Smilies",
+        titleKey: "symbol_group.smilies", title: "Smilies",
         symbols: ["😀", "😁", "😂", "🤣", "😊", "😉", "😍", "😘", "😎", "🤔", "😮", "😢", "😡", "👍", "👎", "👏", "🙏", "💪"]
     },
     {
-        title: "Hinweise",
+        titleKey: "symbol_group.hints", title: "Hinweise",
         symbols: ["✅", "❌", "⚠️", "ℹ️", "❗", "❓", "⭐", "🔥", "💡", "📌", "📍", "🔔", "🔒", "🔓", "📡", "🔋", "🛰️", "📻"]
     },
     {
-        title: "Pfeile",
+        titleKey: "symbol_group.arrows", title: "Pfeile",
         symbols: ["←", "→", "↑", "↓", "↔", "↕", "↖", "↗", "↘", "↙", "⇒", "⇐", "⇑", "⇓", "➜", "➤", "⤴", "⤵"]
     },
     {
-        title: "Technik / Funk",
+        titleKey: "symbol_group.tech_radio", title: "Technik / Funk",
         symbols: ["⚡", "⏻", "⌁", "⎓", "⏚", "Ω", "µ", "°", "±", "×", "÷", "≈", "≠", "≤", "≥", "∞", "λ", "π"]
     },
     {
-        title: "Wetter / Outdoor",
+        titleKey: "symbol_group.weather_outdoor", title: "Wetter / Outdoor",
         symbols: ["☀️", "🌤️", "⛅", "☁️", "🌧️", "⛈️", "❄️", "🌫️", "🌈", "🌙", "🌍", "🌲", "🏔️", "🚁", "🧭", "⌚", "⏱️", "📶"]
     },
     {
-        title: "Textzeichen",
+        titleKey: "symbol_group.text_symbols", title: "Textzeichen",
         symbols: ["©", "®", "™", "§", "¶", "•", "…", "–", "—", "„", "“", "”", "‘", "’", "«", "»", "✓", "✕"]
     }
 ];
@@ -924,7 +936,7 @@ function buildChatSymbolPalette()
 
         return `
             <div class="chat-symbol-group">
-                <div class="chat-symbol-title">${escapeHtml(group.title)}</div>
+                <div class="chat-symbol-title">${escapeHtml(tr(group.titleKey, group.title))}</div>
                 <div class="chat-symbol-grid">${buttons}</div>
             </div>
         `;
@@ -1721,6 +1733,435 @@ async function loadDiscoverStatus()
 async function clearDiscoverRequest()
 {
     return await MeshCoreApi.clearDiscoverRequest();
+}
+
+async function startProtectedRepeaterRequest()
+{
+    return await MeshCoreApi.startProtectedRepeaterRequest();
+}
+
+async function loadProtectedRepeaterStatus()
+{
+    return await MeshCoreApi.loadProtectedRepeaterStatus();
+}
+
+function setProtectedRepeaterStatus(text)
+{
+    if (el.protectedRepeaterStatusText)
+    {
+        el.protectedRepeaterStatusText.textContent = text || "-";
+    }
+}
+
+function signedInt8(value)
+{
+    return value > 127 ? value - 256 : value;
+}
+
+function readLe16(bytes, offset)
+{
+    return bytes[offset] | (bytes[offset + 1] << 8);
+}
+
+function readLe32(bytes, offset)
+{
+    return (
+        (bytes[offset])
+        | (bytes[offset + 1] << 8)
+        | (bytes[offset + 2] << 16)
+        | (bytes[offset + 3] << 24)
+    ) >>> 0;
+}
+
+function decodeNeighboursHex(rawHex)
+{
+    const cleanHex = String(rawHex || "").replace(/\s+/g, "").toLowerCase();
+
+    if (!cleanHex)
+    {
+        throw new Error(tr("protected_repeater.decode.no_raw_hex", "Kein raw_hex in der Antwort gefunden."));
+    }
+
+    if (cleanHex.length % 2 !== 0 || !/^[0-9a-f]+$/.test(cleanHex))
+    {
+        throw new Error(tr("protected_repeater.decode.invalid_hex", "raw_hex ist kein gültiger Hexstring."));
+    }
+
+    const bytes = [];
+
+    for (let i = 0; i < cleanHex.length; i += 2)
+    {
+        bytes.push(parseInt(cleanHex.slice(i, i + 2), 16));
+    }
+
+    if (bytes.length < 4)
+    {
+        throw new Error(tr("protected_repeater.decode.too_short", "raw_hex ist zu kurz für den Header."));
+    }
+
+    const totalCount = readLe16(bytes, 0);
+    const resultCount = readLe16(bytes, 2);
+    const recordSize = 9;
+    const neededLength = 4 + (resultCount * recordSize);
+
+    if (bytes.length < neededLength)
+    {
+        throw new Error(tr("protected_repeater.decode.truncated", "raw_hex ist kürzer als result_count erwarten lässt."));
+    }
+
+    const neighbours = [];
+    let pos = 4;
+
+    for (let i = 0; i < resultCount; i++)
+    {
+        const pubkey = cleanHex.slice(pos * 2, (pos + 4) * 2);
+        pos += 4;
+
+        const secsAgo = readLe32(bytes, pos);
+        pos += 4;
+
+        const snrRaw = signedInt8(bytes[pos]);
+        pos += 1;
+
+        neighbours.push({
+            pubkey: pubkey,
+            secsAgo: secsAgo,
+            snr: snrRaw / 4.0
+        });
+    }
+
+    return {
+        totalCount: totalCount,
+        resultCount: resultCount,
+        neighbours: neighbours
+    };
+}
+
+function formatSnr(value)
+{
+    return Number.isInteger(value) ? value.toFixed(1) : String(value);
+}
+
+function formatTime(totalSeconds)
+{
+    const seconds = Math.max(0, Number(totalSeconds) || 0);
+
+    const hours =
+        Math.floor(seconds / 3600);
+
+    const minutes =
+        Math.floor((seconds % 3600) / 60);
+
+    const secs =
+        seconds % 60;
+
+    return (
+        String(hours).padStart(2, "0") + ":" +
+        String(minutes).padStart(2, "0") + ":" +
+        String(secs).padStart(2, "0")
+    );
+}
+
+function formatProtectedRepeaterResult(resultJson, repeaterNames = {})
+{
+    if (!resultJson)
+    {
+        return "";
+    }
+
+    let payload = null;
+
+    try
+    {
+        payload = JSON.parse(resultJson);
+    }
+    catch (error)
+    {
+        return resultJson;
+    }
+
+    try
+    {
+        const decoded = decodeNeighboursHex(payload.raw_hex || "");
+        const lines = [
+            `total_count: ${decoded.totalCount}`,
+            `result_count: ${decoded.resultCount}`,
+            "",
+            " # pubkey   Name                 hh:mm:ss  SNR[dB]"
+        ];
+
+        decoded.neighbours.forEach(function(neighbour, index)
+        {
+            const repeaterName =
+                repeaterNames[neighbour.pubkey] || "-";
+
+            lines.push(
+                `${String(index + 1).padStart(2, " ")} ` +
+                `${neighbour.pubkey} ` +
+                `${repeaterName.padEnd(20, " ")} ` +
+                `${formatTime(neighbour.secsAgo).padStart(8, " ")} ` +
+                `${formatSnr(neighbour.snr).padStart(7, " ")}`
+            );
+        });
+
+        return lines.join("\n");
+    }
+    catch (error)
+    {
+        return `${tr("protected_repeater.decode.failed", "Antwort konnte nicht dekodiert werden:")} ${error.message}\n\n${resultJson}`;
+    }
+}
+
+function renderProtectedRepeaterStatus(data)
+{
+    const action = data && data.action ? data.action : null;
+    const config = data && data.config ? data.config : null;
+    const targetName = action && action.target_name
+        ? action.target_name
+        : (config && config.protected_repeater_name ? config.protected_repeater_name : "");
+
+    if (el.protectedRepeaterNameInput && document.activeElement !== el.protectedRepeaterNameInput)
+    {
+        el.protectedRepeaterNameInput.value = targetName || "";
+    }
+
+    if (el.protectedRepeaterResult)
+    {
+        el.protectedRepeaterResult.textContent = action && action.result_json
+            ? formatProtectedRepeaterResult(action.result_json, action.repeater_names || {})
+            : "";
+    }
+
+    if (!action)
+    {
+        setProtectedRepeaterStatus(tr("protected_repeater.status.ready", "Bereit"));
+
+        if (el.protectedRepeaterStartButton)
+        {
+            el.protectedRepeaterStartButton.disabled = false;
+        }
+
+        return;
+    }
+
+    if (Number(action.status) === 3)
+    {
+        state.protectedRepeaterPending = false;
+        setProtectedRepeaterStatus(tr("protected_repeater.status.done", "Antwort verfügbar"));
+
+        if (el.protectedRepeaterStartButton)
+        {
+            el.protectedRepeaterStartButton.disabled = false;
+        }
+
+        return;
+    }
+
+    if (Number(action.status) === 2)
+    {
+        state.protectedRepeaterPending = false;
+        setProtectedRepeaterStatus(tr("protected_repeater.status.failed", "Fehler"));
+
+        if (el.protectedRepeaterStartButton)
+        {
+            el.protectedRepeaterStartButton.disabled = false;
+        }
+
+        return;
+    }
+
+    setProtectedRepeaterStatus(tr("protected_repeater.status.waiting", "Warte auf Antwort ..."));
+
+    if (el.protectedRepeaterStartButton)
+    {
+        el.protectedRepeaterStartButton.disabled = true;
+    }
+}
+
+async function refreshProtectedRepeaterModal()
+{
+    try
+    {
+        const data = await loadProtectedRepeaterStatus();
+
+        if (el.protectedRepeaterModalError)
+        {
+            el.protectedRepeaterModalError.textContent = "";
+            el.protectedRepeaterModalError.style.display = "none";
+        }
+
+        renderProtectedRepeaterStatus(data);
+    }
+    catch (error)
+    {
+        if (el.protectedRepeaterModalError)
+        {
+            el.protectedRepeaterModalError.textContent =
+                error.message || tr("protected_repeater.error.status_failed", "Status konnte nicht geladen werden.");
+            el.protectedRepeaterModalError.style.display = "block";
+        }
+    }
+}
+
+async function saveProtectedRepeaterNameBeforeRequest()
+{
+    const homeRepeaterName = el.protectedRepeaterNameInput ? el.protectedRepeaterNameInput.value.trim() : "";
+
+    if (homeRepeaterName.length > 64)
+    {
+        throw new Error(tr("setup.error.home_repeater_too_long", "Home Repeater ist zu lang."));
+    }
+
+    const setupData = await loadCompanionSetup();
+    const cfg = setupData && setupData.config ? setupData.config : null;
+
+    if (!cfg)
+    {
+        throw new Error(tr("setup.error.load_failed", "Setup-Werte konnten nicht geladen werden."));
+    }
+
+    const name = cfg.name ? String(cfg.name).trim() : "";
+    const latitude = Number(cfg.latitude);
+    const longitude = Number(cfg.longitude);
+
+    if (name === "" || !Number.isFinite(latitude) || !Number.isFinite(longitude))
+    {
+        throw new Error(tr("setup.error.load_failed", "Setup-Werte konnten nicht geladen werden."));
+    }
+
+    await MeshCoreApi.applyCompanionSetup(
+    {
+        name: name,
+        location_name: cfg.location_name || "",
+        protected_repeater_name: homeRepeaterName,
+        latitude: latitude,
+        longitude: longitude
+    });
+}
+
+async function handleProtectedRepeaterStartClick()
+{
+    if (state.protectedRepeaterPending)
+    {
+        return;
+    }
+
+    state.protectedRepeaterPending = true;
+    state.protectedRepeaterActionId = null;
+
+    if (el.protectedRepeaterModalError)
+    {
+        el.protectedRepeaterModalError.textContent = "";
+        el.protectedRepeaterModalError.style.display = "none";
+    }
+
+    if (el.protectedRepeaterResult)
+    {
+        el.protectedRepeaterResult.textContent = "";
+    }
+
+    setProtectedRepeaterStatus(tr("protected_repeater.status.waiting", "Warte auf Antwort ..."));
+
+    if (el.protectedRepeaterStartButton)
+    {
+        el.protectedRepeaterStartButton.disabled = true;
+    }
+
+    try
+    {
+        await saveProtectedRepeaterNameBeforeRequest();
+        const response = await startProtectedRepeaterRequest();
+        state.protectedRepeaterActionId = response && response.action_id ? Number(response.action_id) : null;
+        await refreshProtectedRepeaterModal();
+    }
+    catch (error)
+    {
+        state.protectedRepeaterPending = false;
+
+        if (el.protectedRepeaterStartButton)
+        {
+            el.protectedRepeaterStartButton.disabled = false;
+        }
+
+        if (el.protectedRepeaterModalError)
+        {
+            el.protectedRepeaterModalError.textContent =
+                error.message || tr("protected_repeater.error.start_failed", "Abfrage konnte nicht gestartet werden.");
+            el.protectedRepeaterModalError.style.display = "block";
+        }
+    }
+}
+
+function stopProtectedRepeaterPolling()
+{
+    if (state.protectedRepeaterPollTimer)
+    {
+        clearInterval(state.protectedRepeaterPollTimer);
+        state.protectedRepeaterPollTimer = null;
+    }
+}
+
+function startProtectedRepeaterPolling()
+{
+    stopProtectedRepeaterPolling();
+
+    state.protectedRepeaterPollTimer = setInterval(function()
+    {
+        if (!state.protectedRepeaterModalOpen)
+        {
+            return;
+        }
+
+        refreshProtectedRepeaterModal();
+    }, 1000);
+}
+
+async function openProtectedRepeaterDialog()
+{
+    if (!el.protectedRepeaterModal)
+    {
+        return;
+    }
+
+    state.protectedRepeaterModalOpen = true;
+
+    if (el.protectedRepeaterModalError)
+    {
+        el.protectedRepeaterModalError.textContent = "";
+        el.protectedRepeaterModalError.style.display = "none";
+    }
+
+    el.protectedRepeaterModal.classList.add("visible");
+    el.protectedRepeaterModal.setAttribute("aria-hidden", "false");
+
+    await refreshProtectedRepeaterModal();
+
+    if (el.protectedRepeaterNameInput)
+    {
+        el.protectedRepeaterNameInput.focus();
+    }
+
+    startProtectedRepeaterPolling();
+}
+
+function closeProtectedRepeaterDialog()
+{
+    state.protectedRepeaterModalOpen = false;
+    stopProtectedRepeaterPolling();
+
+    if (!el.protectedRepeaterModal)
+    {
+        return;
+    }
+
+    el.protectedRepeaterModal.classList.remove("visible");
+    el.protectedRepeaterModal.setAttribute("aria-hidden", "true");
+
+    if (el.protectedRepeaterModalError)
+    {
+        el.protectedRepeaterModalError.textContent = "";
+        el.protectedRepeaterModalError.style.display = "none";
+    }
 }
 
 function renderDiscoverResults(results)
@@ -4645,6 +5086,9 @@ async function applyCompanionSetup()
 {
     const name = el.setupNameInput ? el.setupNameInput.value.trim() : "";
     const locationName = el.setupCityInput ? el.setupCityInput.value.trim() : "";
+    const setupData = await loadCompanionSetup();
+    const cfg = setupData && setupData.config ? setupData.config : null;
+    const homeRepeaterName = cfg && cfg.protected_repeater_name ? String(cfg.protected_repeater_name).trim() : "";
     const latText = el.setupLatInput ? el.setupLatInput.value.trim() : "";
     const lonText = el.setupLonInput ? el.setupLonInput.value.trim() : "";
 
@@ -4661,6 +5105,11 @@ async function applyCompanionSetup()
         throw new Error(tr("setup.error.city_too_long", "City ist zu lang."));
     }
 
+    if (homeRepeaterName.length > 64)
+    {
+        throw new Error(tr("setup.error.home_repeater_too_long", "Home Repeater ist zu lang."));
+    }
+
     if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90)
     {
         throw new Error(tr("setup.error.latitude_invalid", "Latitude ist ungültig."));
@@ -4675,6 +5124,7 @@ async function applyCompanionSetup()
     {
         name: name,
         location_name: locationName,
+        protected_repeater_name: homeRepeaterName,
         latitude: latitude,
         longitude: longitude
     });
@@ -4775,6 +5225,27 @@ el.resetPathButton?.addEventListener("click", function()
 {
     handleResetPathButtonClick();
 });
+
+if (el.protectedRepeaterButton)
+{
+    el.protectedRepeaterButton.addEventListener("click", async function()
+    {
+        await openProtectedRepeaterDialog();
+    });
+}
+
+if (el.protectedRepeaterStartButton)
+{
+    el.protectedRepeaterStartButton.addEventListener("click", handleProtectedRepeaterStartClick);
+}
+
+if (el.protectedRepeaterCloseButton)
+{
+    el.protectedRepeaterCloseButton.addEventListener("click", function()
+    {
+        closeProtectedRepeaterDialog();
+    });
+}
 
 if (el.setupButton)
 {

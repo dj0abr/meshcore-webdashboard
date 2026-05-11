@@ -33,6 +33,7 @@ namespace MeshCoreProto
     static constexpr uint8_t CMD_DEVICE_QUERY      = 22;
     static constexpr uint8_t CMD_SEND_LOGIN        = 26;
     static constexpr uint8_t CMD_SET_OTHER_PARAMS  = 38;
+    static constexpr uint8_t CMD_SEND_RAW_DATA      = 0x32;
     static constexpr uint8_t CMD_GET_CHANNEL_INFO   = 0x1F;
     static constexpr uint8_t CMD_SET_CHANNEL        = 0x20;
     static constexpr uint8_t CMD_SEND_CONTROL_DATA = 0x37;

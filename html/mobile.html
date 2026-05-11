@@ -26,7 +26,7 @@
             <button type="button" id="mobileSendButton" class="send-button" aria-label="Senden" data-i18n-aria-label="chat.send">➤</button>
         </footer>
 
-        <nav id="mobileNav" class="mobile-nav" aria-label="Mobile Navigation">
+        <nav id="mobileNav" class="mobile-nav" aria-label="Mobile Navigation" data-i18n-aria-label="mobile.navigation">
             <button type="button" class="nav-button active" data-view="contacts" data-i18n="tabs.contacts">Kontakte</button>
             <button type="button" class="nav-button" data-view="channels" data-i18n="tabs.channels">Channels</button>
             <button type="button" class="nav-button" data-view="info" aria-label="Info" data-i18n-aria-label="mobile.nav.info">⚙</button>
@@ -58,11 +58,11 @@
                     </div>
                     <div class="mobile-form-group mobile-fixed-radio">
                         <label data-i18n="setup.fixed_radio">Feste Funkparameter</label>
-                        <div>Frequenz: 869.618 MHz</div>
-                        <div>Bandwidth: 62.5 kHz</div>
+                        <div><span data-i18n="setup.frequency">Frequenz</span>: 869.618 MHz</div>
+                        <div><span data-i18n="setup.bandwidth">Bandwidth</span>: 62.5 kHz</div>
                         <div>SF: 8</div>
                         <div>CR: 8</div>
-                        <div>TX Power: 22 dBm</div>
+                        <div><span data-i18n="setup.tx_power">TX Power</span>: 22 dBm</div>
                     </div>
                     <div id="setupModalError" class="mobile-modal-error" style="display:none;"></div>
                 </div>
@@ -105,7 +105,7 @@
         <div id="channelModal" class="mobile-modal-overlay" aria-hidden="true">
             <div class="mobile-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="channelModalTitle">
                 <div class="mobile-modal-header">
-                    <h3 id="channelModalTitle">Channel</h3>
+                    <h3 id="channelModalTitle" data-i18n="channel.modal.base_title">Channel</h3>
                 </div>
                 <div class="mobile-modal-body">
                     <div id="channelModalSubtitle" class="mobile-modal-subtitle"></div>
@@ -129,7 +129,7 @@
                     <div id="channelModalError" class="mobile-modal-error" style="display:none;"></div>
                 </div>
                 <div class="mobile-modal-footer">
-                    <button id="channelConfirmButton" type="button" class="mobile-primary-button">OK</button>
+                    <button id="channelConfirmButton" type="button" class="mobile-primary-button" data-i18n="channel.ok">OK</button>
                     <button id="channelCancelButton" type="button" data-i18n="setup.cancel">Cancel</button>
                 </div>
             </div>
@@ -153,7 +153,7 @@
                     </div>
                 </div>
                 <div class="mobile-modal-footer">
-                    <button id="languageCloseButton" type="button" class="mobile-primary-button">OK</button>
+                    <button id="languageCloseButton" type="button" class="mobile-primary-button" data-i18n="channel.ok">OK</button>
                 </div>
             </div>
         </div>

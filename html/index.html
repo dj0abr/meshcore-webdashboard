@@ -1158,6 +1158,7 @@
         }
 
         #discoverButton,
+        #protectedRepeaterButton,
         #settingsButton
         {
             width: 44px;
@@ -1174,6 +1175,7 @@
         }
 
         #discoverButton:hover,
+        #protectedRepeaterButton:hover,
         #settingsButton:hover
         {
             background: #162033;
@@ -1642,7 +1644,7 @@
                 </div>
             </div>
 
-            <select id="languageSelect" class="header-language-select" aria-label="Language">
+            <select id="languageSelect" class="header-language-select" aria-label="Language" data-i18n-aria-label="language.label">
                 <option value="de">DE</option>
                 <option value="en">EN</option>
                 <option value="es">ES</option>
@@ -1651,16 +1653,17 @@
             </select>
 
             <button id="discoverButton" type="button" data-i18n-title="discover.title">🔎</button>
+            <button id="protectedRepeaterButton" type="button" data-i18n-title="protected_repeater.title">📡</button>
             <button id="settingsButton" type="button" data-i18n-title="setup.title">⚙</button>
         </div>
 
-        <div id="noiseFloorMeter" class="noise-floor-meter" title="Noise floor">
+        <div id="noiseFloorMeter" class="noise-floor-meter" title="Noise floor" data-i18n-title="radio.noise_floor">
             <div class="noise-floor-track" aria-hidden="true">
                 <div id="noiseFloorFill" class="noise-floor-fill"></div>
             </div>
             <div id="noiseFloorText" class="noise-floor-text">NF: --</div>
             <div id="batteryVoltageText" class="battery-voltage-text">Batt: --</div>
-            <div class="companion-link-status" title="Companion connection">
+            <div class="companion-link-status" title="Companion connection" data-i18n-title="radio.companion_connection">
                 <span id="companionLinkLed" class="companion-link-led offline"></span>
             </div>
         </div>
@@ -1689,12 +1692,12 @@
                 <div class="node-filter-options">
                     <label class="checkbox-label">
                         <input type="checkbox" id="callsignFilter">
-                        Callsign
+                        <span data-i18n="filter.callsign">Callsign</span>
                     </label>
 
-                    <label class="checkbox-label" title="Nur Kontakte mit Chat-Nachrichten anzeigen">
+                    <label class="checkbox-label" title="Nur Kontakte mit Chat-Nachrichten anzeigen" data-i18n-title="filter.active_title">
                         <input type="checkbox" id="activeFilter">
-                        Active
+                        <span data-i18n="filter.active">Active</span>
                     </label>
 <!--
                     <label class="checkbox-label" title="Nur lokal erkannte Nodes anzeigen">
@@ -1729,7 +1732,7 @@
                     <div id="channelsPanel" class="sidebar-panel">
                         <div class="channels-toolbar">
                             <select id="channelActionSelect">
-                                <option value="">Action...</option>
+                                <option value="" data-i18n="channel.action.placeholder">Action...</option>
                                 <option value="create_private" data-i18n="channel.button.create_private">Create Private</option>
                                 <option value="join_private" data-i18n="channel.button.join_private">Join Private</option>
                                 <option value="join_public" data-i18n="channel.button.join_public">Join Public</option>
@@ -1758,7 +1761,7 @@
                         type="button"
                         style="display:none;"
                     >
-                        Position
+                        <span data-i18n="map.position">Position</span>
                     </button>
 
                     <button
@@ -1767,7 +1770,7 @@
                         type="button"
                         style="display:none;"
                     >
-                        Path
+                        <span data-i18n="chat.path">Path</span>
                     </button>
 
                     <button
@@ -1785,22 +1788,22 @@
             <div id="messagesPanelContent" class="panel-content">
                 <div id="mapViewWrapper" class="map-frame-wrapper" style="display:none;">
                     <div id="mapPathControls" class="chat-path-map-header map-path-controls">
-                        <strong>Path</strong>
+                        <strong data-i18n="chat.path">Path</strong>
 
                         <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
                             <label class="path-map-toggle">
                                 <input id="mapPathToggleNames" type="checkbox" checked>
-                                <span>Namen</span>
+                                <span data-i18n="path.names">Namen</span>
                             </label>
 
                             <label class="path-map-toggle">
                                 <input id="mapPathToggleHash" type="checkbox" checked>
-                                <span>Hash</span>
+                                <span data-i18n="path.hash">Hash</span>
                             </label>
 
                             <label class="path-map-toggle">
                                 <input id="mapPathToggleDistances" type="checkbox" checked>
-                                <span>Entfernung</span>
+                                <span data-i18n="path.distance">Entfernung</span>
                             </label>
                         </div>
                     </div>
@@ -1810,12 +1813,12 @@
 
                 <div id="chatTabsView" class="chat-tabs-view" style="display:none;">
                     <div class="chat-tabs-bar">
-                        <button id="tabMessagesViewBtn" class="chat-tab-button active" type="button">Messages</button>
-                        <button id="tabPathMapViewBtn" class="chat-tab-button" type="button">Path Map</button>
+                        <button id="tabMessagesViewBtn" class="chat-tab-button active" type="button" data-i18n="panel.messages">Messages</button>
+                        <button id="tabPathMapViewBtn" class="chat-tab-button" type="button" data-i18n="path.map">Path Map</button>
 
-                        <label class="path-map-toggle" title="Notification-Beep ein/ausschalten">
+                        <label class="path-map-toggle" title="Notification-Beep ein/ausschalten" data-i18n-title="audio.notification_toggle">
                             <input id="notificationAudioToggle" type="checkbox" checked>
-                            <span>Audio</span>
+                            <span data-i18n="audio.label">Audio</span>
                         </label>
                     </div>
 
@@ -1840,7 +1843,7 @@
                                     data-i18n-placeholder="chat.input_placeholder"
                                     data-placeholder="Nachricht eingeben und Enter drücken ..."
                                 ></div>
-                                <button id="chatSymbolButton" class="chat-send-button chat-symbol-button" type="button" title="Symbol einfügen" aria-label="Symbol einfügen">☺</button>
+                                <button id="chatSymbolButton" class="chat-send-button chat-symbol-button" type="button" title="Symbol einfügen" aria-label="Symbol einfügen" data-i18n-title="chat.symbol_insert" data-i18n-aria-label="chat.symbol_insert">☺</button>
                                 <button id="chatSendButton" class="chat-send-button" type="button" data-i18n="chat.send">Senden</button>
                                 <div id="chatSymbolPalette" class="chat-symbol-palette" aria-hidden="true"></div>
                             </div>
@@ -1850,24 +1853,24 @@
                     <div id="pathMapTabView" class="chat-tab-panel">
                         <div id="chatPathMapPanel" class="chat-path-map-panel">
                             <div class="chat-path-map-header">
-                                <strong>Message Path</strong>
+                                <strong data-i18n="path.message_path">Message Path</strong>
 
                                 <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
                                     <span id="chatPathMapInfo" class="chat-path-map-info"></span>
 
                                     <label class="path-map-toggle">
                                         <input id="chatPathToggleNames" type="checkbox" checked>
-                                        <span>Namen</span>
+                                        <span data-i18n="path.names">Namen</span>
                                     </label>
 
                                     <label class="path-map-toggle">
                                         <input id="chatPathToggleHash" type="checkbox" checked>
-                                        <span>Hash</span>
+                                        <span data-i18n="path.hash">Hash</span>
                                     </label>
 
                                     <label class="path-map-toggle">
                                         <input id="chatPathToggleDistances" type="checkbox" checked>
-                                        <span>Entfernung</span>
+                                        <span data-i18n="path.distance">Entfernung</span>
                                     </label>
                                 </div>
                             </div>
@@ -1984,6 +1987,39 @@
         </div>
     </div>
 
+
+    <div id="protectedRepeaterModal" class="modal-overlay" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-header">
+                <h3 data-i18n="protected_repeater.title">Home Repeater abfragen</h3>
+            </div>
+
+            <div class="modal-body">
+                <div class="form-group">
+                    <label data-i18n="protected_repeater.status.label">Status</label>
+                    <div id="protectedRepeaterStatusText">-</div>
+                </div>
+
+                <div class="form-group">
+                    <label for="protectedRepeaterNameInput" data-i18n="protected_repeater.target.label">Home Repeater</label>
+                    <input id="protectedRepeaterNameInput" type="text" autocomplete="off" maxlength="64">
+                </div>
+
+                <div class="form-group">
+                    <label data-i18n="protected_repeater.result.label">Antwort</label>
+                    <pre id="protectedRepeaterResult" class="protected-repeater-result"></pre>
+                </div>
+
+                <div id="protectedRepeaterModalError" class="modal-error" style="display:none;"></div>
+            </div>
+
+            <div class="modal-footer">
+                <button id="protectedRepeaterStartButton" type="button" data-i18n="protected_repeater.button.start">START</button>
+                <button id="protectedRepeaterCloseButton" type="button" data-i18n="protected_repeater.button.close">Schließen</button>
+            </div>
+        </div>
+    </div>
+
     <div id="setupModal" class="modal-overlay" aria-hidden="true">
         <div class="modal-dialog">
             <div class="modal-header">
@@ -2000,6 +2036,7 @@
                     <label for="setupCityInput" data-i18n="setup.city">City</label>
                     <input id="setupCityInput" type="text" autocomplete="off" maxlength="128">
                 </div>
+
 
                 <div class="form-group">
                     <label for="setupLatInput" data-i18n="setup.latitude">Latitude</label>

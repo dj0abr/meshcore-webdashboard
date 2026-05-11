@@ -29,6 +29,7 @@ try
         SELECT
             name,
             location_name,
+            protected_repeater_name,
             latitude_e6,
             longitude_e6,
             apply_pending,
@@ -63,6 +64,7 @@ try
             [
                 'name' => (string) $row['name'],
                 'location_name' => $row['location_name'] !== null ? (string) $row['location_name'] : '',
+                'protected_repeater_name' => $row['protected_repeater_name'] !== null ? (string) $row['protected_repeater_name'] : '',
                 'latitude' => $latitude,
                 'longitude' => $longitude,
                 'apply_pending' => ((int) $row['apply_pending'] === 1),

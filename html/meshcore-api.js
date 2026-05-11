@@ -81,6 +81,22 @@
         return await fetchJson("discover_clear.php", postEmpty());
     }
 
+    async function startProtectedRepeaterRequest()
+    {
+        return await fetchJson("protected_repeater_request.php", postJson(
+        {
+            command: "start"
+        }));
+    }
+
+    async function loadProtectedRepeaterStatus()
+    {
+        return await fetchJson(
+            withCacheBuster("protected_repeater_request.php?command=status"),
+            noStoreGet()
+        );
+    }
+
     async function loadNodePath(nodeId)
     {
         return await fetchJson(
@@ -202,6 +218,8 @@
         startDiscover,
         loadDiscoverStatus,
         clearDiscoverRequest,
+        startProtectedRepeaterRequest,
+        loadProtectedRepeaterStatus,
         loadNodePath,
         loadMessagePath,
         loadMessages,

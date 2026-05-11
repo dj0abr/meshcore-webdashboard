@@ -14,6 +14,63 @@
 static constexpr unsigned DISCOVER_COOLDOWN_SECONDS = 5;
 static constexpr unsigned RADIO_STATUS_POLL_SECONDS = 20;
 
+static std::string JsonEscapeLocal(const std::string& value)
+{
+    std::ostringstream oss;
+
+    for (unsigned char c : value)
+    {
+        switch (c)
+        {
+            case '"':
+                oss << "\\\"";
+                break;
+
+            case '\\':
+                oss << "\\\\";
+                break;
+
+            case '\b':
+                oss << "\\b";
+                break;
+
+            case '\f':
+                oss << "\\f";
+                break;
+
+            case '\n':
+                oss << "\\n";
+                break;
+
+            case '\r':
+                oss << "\\r";
+                break;
+
+            case '\t':
+                oss << "\\t";
+                break;
+
+            default:
+                if (c < 0x20)
+                {
+                    oss << "\\u"
+                        << std::hex
+                        << std::setw(4)
+                        << std::setfill('0')
+                        << static_cast<unsigned>(c)
+                        << std::dec;
+                }
+                else
+                {
+                    oss << static_cast<char>(c);
+                }
+                break;
+        }
+    }
+
+    return oss.str();
+}
+
 static int HexNibble(char c)
 {
     if (c >= '0' && c <= '9')
@@ -361,7 +418,11 @@ void AppRuntime::QueueRepeaterContactPrune(
     const std::vector<MeshCoreClient::Peer>& peers,
     const std::vector<bool>& keep)
 {
+    static constexpr const char* KeepRepeaterName = "Repeater Hinterherberg";
+
     m_repeaterPruneQueue.clear();
+
+    const std::string protectedRepeaterName = MeshDB::GetProtectedRepeaterName();
 
     for (size_t i = 0; i < peers.size(); i++)
     {
@@ -374,6 +435,28 @@ void AppRuntime::QueueRepeaterContactPrune(
 
         if (p.type != static_cast<uint8_t>(DataConnector::AdvertType::REPEATER))
         {
+            continue;
+        }
+
+        if (p.name == KeepRepeaterName)
+        {
+            std::cout << "[SYNC] keeping repeater contact in companion: \""
+                      << p.name
+                      << "\" node_id="
+                      << p.nodeId()
+                      << "\n";
+            continue;
+        }
+
+        if (!protectedRepeaterName.empty() && p.name == protectedRepeaterName)
+        {
+            std::cout
+                << "[SYNC] keeping protected repeater contact in companion: \""
+                << p.name
+                << "\" node_id="
+                << p.nodeId()
+                << "\n";
+
             continue;
         }
 
@@ -1731,6 +1814,48 @@ bool AppRuntime::ProcessSingleCompanionAction(const MeshDB::CompanionAction& act
         std::cout
             << "[companion] reset_path done for "
             << action.publicKeyHex
+            << "\n";
+
+        return true;
+    }
+
+    if (action.actionType == "req_neighbours")
+    {
+        if (action.targetName.empty())
+        {
+            MeshDB::MarkCompanionActionFailed(action.id, "target_name missing");
+            return false;
+        }
+
+        auto rawHex = m_client.requestNeighboursRaw(action.targetName);
+
+        if (!rawHex.has_value())
+        {
+            MeshDB::MarkCompanionActionFailed(action.id, "request neighbours failed");
+            return false;
+        }
+
+        std::ostringstream resultJson;
+        resultJson
+            << "{"
+            << "\"repeater_name\":\"" << JsonEscapeLocal(action.targetName) << "\","
+            << "\"raw_hex\":\"" << JsonEscapeLocal(*rawHex) << "\""
+            << "}";
+
+        if (!MeshDB::SetCompanionActionResult(action.id, resultJson.str()))
+        {
+            MeshDB::MarkCompanionActionFailed(action.id, "storing neighbours result failed");
+            return false;
+        }
+
+        if (!MeshDB::MarkCompanionActionDone(action.id))
+        {
+            return false;
+        }
+
+        std::cout
+            << "[companion] req_neighbours done for "
+            << action.targetName
             << "\n";
 
         return true;
