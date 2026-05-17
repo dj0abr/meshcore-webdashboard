@@ -1,0 +1,368 @@
+diff -ruN base2/app.js work2/app.js
+--- base2/app.js	2026-05-14 16:39:47.934875116 +0000
++++ work2/app.js	2026-05-14 16:39:40.576673148 +0000
+@@ -3,7 +3,8 @@
+ const CONTACT_READ_STORAGE_KEY = "meshcore.contactLastReadEpoch";
+ const PATH_DISPLAY_SETTINGS_STORAGE_KEY = "meshcore.pathDisplaySettings";
+ const NOTIFICATION_AUDIO_ENABLED_STORAGE_KEY = "meshcore.notificationAudioEnabled";
+-const MONITOR_VISIBLE_COLUMNS_STORAGE_KEY = "meshcore.monitorVisibleColumns";
++const MONITOR_VISIBLE_COLUMNS_STORAGE_KEY = "meshcore.monitorVisibleColumns.v2";
++const MONITOR_REFRESH_INTERVAL_MS = 2000;
+ 
+ const MeshCoreShared = window.MeshCoreShared;
+ const MeshCoreApi = window.MeshCoreApi;
+@@ -287,6 +288,9 @@
+     monitorTable: null,
+     monitorRows: [],
+     monitorVisibleColumns: null,
++    monitorRefreshTimer: null,
++    monitorRefreshBusy: false,
++    monitorLastId: 0,
+     mapContextRow: null,
+     resetPathPending: false,
+     noiseFloorRefreshTimer: null,
+@@ -1595,6 +1599,7 @@
+ 
+ function hideRightPanelViews()
+ {
++    stopMonitorRefresh();
+     if (el.mapViewWrapper)
+     {
+         el.mapViewWrapper.style.display = "none";
+@@ -2609,22 +2614,33 @@
+ ];
+ 
+ const MONITOR_DEFAULT_COLUMNS = [
+-    "id",
+-    "created_at",
+-    "source",
+-    "push_code",
+-    "payload_len",
+-    "packet_valid",
+-    "snr_db",
+-    "rssi_dbm",
+-    "route_type",
+     "payload_type",
++    "path_len",
++    "path_hash_size",
+     "path_text",
+-    "grp_channel_name",
+-    "grp_text",
+     "advert_name"
+ ];
+ 
++const MONITOR_PAYLOAD_TYPE_NAMES =
++{
++    0x00: "REQ",
++    0x01: "RESPONSE",
++    0x02: "TXT_MSG",
++    0x03: "ACK",
++    0x04: "ADVERT",
++    0x05: "GRP_TXT",
++    0x06: "GRP_DATA",
++    0x07: "ANON_REQ",
++    0x08: "PATH",
++    0x09: "TRACE",
++    0x0A: "MULTIPART",
++    0x0B: "CONTROL",
++    0x0C: "RESERVED_C",
++    0x0D: "RESERVED_D",
++    0x0E: "RESERVED_E",
++    0x0F: "RAW_CUSTOM"
++};
++
+ function loadMonitorVisibleColumns()
+ {
+     try
+@@ -2667,6 +2683,100 @@
+     }
+ }
+ 
++function formatMonitorHexNumber(value, width)
++{
++    if (value === null || value === undefined || value === "")
++    {
++        return "";
++    }
++
++    const numberValue = Number(value);
++
++    if (!Number.isFinite(numberValue))
++    {
++        return String(value);
++    }
++
++    return "0x" + (numberValue >>> 0).toString(16).toUpperCase().padStart(width, "0");
++}
++
++function formatMonitorPayloadType(value)
++{
++    if (value === null || value === undefined || value === "")
++    {
++        return "";
++    }
++
++    const numberValue = Number(value);
++
++    if (!Number.isFinite(numberValue))
++    {
++        return String(value);
++    }
++
++    const name = MONITOR_PAYLOAD_TYPE_NAMES[numberValue];
++    const hex = formatMonitorHexNumber(numberValue, 2);
++
++    if (!name)
++    {
++        return "UNKNOWN " + hex;
++    }
++
++    return name + " " + hex;
++}
++
++function formatMonitorRow(row)
++{
++    const formatted = Object.assign({}, row);
++
++    formatted.pkt_hash = formatMonitorHexNumber(row.pkt_hash, 8);
++    formatted.payload_type = formatMonitorPayloadType(row.payload_type);
++
++    return formatted;
++}
++
++function formatMonitorRows(rows)
++{
++    return rows.map(formatMonitorRow);
++}
++
++function getMonitorLastId(rows)
++{
++    return rows.reduce(function(maxId, row)
++    {
++        const id = Number(row.id);
++
++        return Number.isFinite(id) && id > maxId ? id : maxId;
++    }, 0);
++}
++
++function scrollMonitorToNewest()
++{
++    if (!state.monitorTable || state.monitorRows.length === 0)
++    {
++        return;
++    }
++
++    const newestRow = state.monitorRows[state.monitorRows.length - 1];
++
++    if (!newestRow || newestRow.id === undefined || newestRow.id === null)
++    {
++        return;
++    }
++
++    requestAnimationFrame(function()
++    {
++        try
++        {
++            state.monitorTable.scrollToRow(newestRow.id, "bottom", false);
++        }
++        catch (err)
++        {
++            // The row may not exist while Tabulator is still rendering. Ignore this refresh cycle.
++        }
++    });
++}
++
+ function buildMonitorColumnDefinition(field)
+ {
+     const isLongText = /hex$/.test(field) || field === "payload_hex" || field === "rf_packet_hex" || field === "pkt_payload_hex";
+@@ -2763,6 +2873,7 @@
+             data: [],
+             layout: "fitDataStretch",
+             height: "100%",
++            index: "id",
+             movableColumns: true,
+             columnDefaults:
+             {
+@@ -2776,40 +2887,45 @@
+     return state.monitorTable;
+ }
+ 
+-async function showMonitor()
++function stopMonitorRefresh()
+ {
+-    stopCurrentChatRefresh();
+-    resetChatState();
+-    hideChatPathMap();
+-    hideRightPanelViews();
+-    setChatInputEnabled(false);
+-    state.rightView = "monitor";
+-    setRightPanelMode("monitor", null);
+-
+-    if (el.monitorView)
++    if (state.monitorRefreshTimer)
+     {
+-        el.monitorView.style.display = "flex";
++        clearInterval(state.monitorRefreshTimer);
++        state.monitorRefreshTimer = null;
+     }
++}
+ 
+-    renderMonitorColumnToolbar();
+-
++async function refreshMonitor(autoScrollOnNewData)
++{
+     const monitorTable = ensureMonitorTable();
+ 
+-    if (!monitorTable)
++    if (!monitorTable || state.monitorRefreshBusy)
+     {
+         return;
+     }
+ 
+-    monitorTable.setData([]);
++    state.monitorRefreshBusy = true;
+ 
+     try
+     {
++        const previousLastId = state.monitorLastId;
+         const data = await MeshCoreApi.loadMonitor();
+-        const rows = Array.isArray(data.rows) ? data.rows : [];
++        const rows = formatMonitorRows(Array.isArray(data.rows) ? data.rows : []);
++        const newestId = getMonitorLastId(rows);
++        const hasNewRows = newestId > previousLastId;
++
+         state.monitorRows = rows;
++        state.monitorLastId = newestId;
++
+         setRightPanelHeader("Monitor", rows.length + " Zeilen aus meshcore_monitor");
+-        monitorTable.setData(rows);
++        await monitorTable.replaceData(rows);
+         monitorTable.redraw(true);
++
++        if (autoScrollOnNewData && hasNewRows)
++        {
++            scrollMonitorToNewest();
++        }
+     }
+     catch (error)
+     {
+@@ -2821,6 +2937,51 @@
+             decode_error: error.message || String(error)
+         }]);
+     }
++    finally
++    {
++        state.monitorRefreshBusy = false;
++    }
++}
++
++function startMonitorRefresh()
++{
++    stopMonitorRefresh();
++
++    state.monitorRefreshTimer = setInterval(function()
++    {
++        refreshMonitor(true);
++    }, MONITOR_REFRESH_INTERVAL_MS);
++}
++
++async function showMonitor()
++{
++    stopCurrentChatRefresh();
++    resetChatState();
++    hideChatPathMap();
++    hideRightPanelViews();
++    setChatInputEnabled(false);
++    state.rightView = "monitor";
++    setRightPanelMode("monitor", null);
++
++    if (el.monitorView)
++    {
++        el.monitorView.style.display = "flex";
++    }
++
++    renderMonitorColumnToolbar();
++
++    const monitorTable = ensureMonitorTable();
++
++    if (!monitorTable)
++    {
++        return;
++    }
++
++    state.monitorLastId = 0;
++    monitorTable.setData([]);
++
++    await refreshMonitor(true);
++    startMonitorRefresh();
+ }
+ 
+ function showEmptyRightPanel()
+diff -ruN base2/monitor.php work2/monitor.php
+--- base2/monitor.php	2026-05-14 16:39:47.938772921 +0000
++++ work2/monitor.php	2026-05-14 16:39:42.622471270 +0000
+@@ -68,9 +68,61 @@
+             advert_latitude_e6,
+             advert_longitude_e6,
+             advert_name
+-        FROM meshcore_monitor
+-        ORDER BY id DESC
+-        LIMIT 1000
++        FROM (
++            SELECT
++                id,
++                created_at,
++                source,
++                push_code,
++                payload_len,
++                payload_hex,
++                packet_valid,
++                decode_error,
++                snr_db,
++                rssi_dbm,
++                route_type,
++                payload_type,
++                payload_version,
++                path_len,
++                path_hash_size,
++                path_text,
++                pkt_hash,
++                rf_packet_hex,
++                pkt_payload_len,
++                pkt_payload_hex,
++                req_valid,
++                req_dst_hash,
++                req_src_hash,
++                req_mac,
++                req_cipher_len,
++                grp_txt_valid,
++                grp_channel_hash,
++                grp_mac,
++                grp_decrypt_tried,
++                grp_decrypt_ok,
++                grp_mac_verified,
++                grp_timestamp,
++                grp_txt_type,
++                grp_channel_name,
++                grp_channel_key_hex,
++                grp_text,
++                advert_valid,
++                advert_public_key_hex,
++                advert_timestamp,
++                advert_flags,
++                advert_role,
++                advert_has_gps,
++                advert_has_ble,
++                advert_has_shortcut,
++                advert_has_name,
++                advert_latitude_e6,
++                advert_longitude_e6,
++                advert_name
++            FROM meshcore_monitor
++            ORDER BY id DESC
++            LIMIT 1000
++        ) AS latest_rows
++        ORDER BY id ASC
+     ');
+ 
+     $rows = [];

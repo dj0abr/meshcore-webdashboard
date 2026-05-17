@@ -667,6 +667,65 @@ bool MeshDB::EnsureSchema()
         "    queue_len INT UNSIGNED DEFAULT NULL,"
         "    PRIMARY KEY (id)"
         ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4";
+
+    const char* sqlMeshcoreMonitor =
+        "CREATE TABLE IF NOT EXISTS meshcore_monitor ("
+        "    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,"
+        "    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,"
+        "    source VARCHAR(32) NOT NULL,"
+        "    push_code TINYINT UNSIGNED NOT NULL,"
+        "    payload_len INT UNSIGNED NOT NULL,"
+        "    payload_hex MEDIUMTEXT DEFAULT NULL,"
+        "    packet_valid TINYINT(1) DEFAULT NULL,"
+        "    decode_error VARCHAR(255) DEFAULT NULL,"
+        "    snr_db DOUBLE DEFAULT NULL,"
+        "    rssi_dbm INT DEFAULT NULL,"
+        "    route_type TINYINT UNSIGNED DEFAULT NULL,"
+        "    payload_type TINYINT UNSIGNED DEFAULT NULL,"
+        "    payload_version TINYINT UNSIGNED DEFAULT NULL,"
+        "    path_len TINYINT UNSIGNED DEFAULT NULL,"
+        "    path_hash_size TINYINT UNSIGNED DEFAULT NULL,"
+        "    path_text TEXT DEFAULT NULL,"
+        "    pkt_hash INT UNSIGNED DEFAULT NULL,"
+        "    rf_packet_hex MEDIUMTEXT DEFAULT NULL,"
+        "    pkt_payload_len INT UNSIGNED DEFAULT NULL,"
+        "    pkt_payload_hex MEDIUMTEXT DEFAULT NULL,"
+        "    req_valid TINYINT(1) DEFAULT NULL,"
+        "    req_dst_hash TINYINT UNSIGNED DEFAULT NULL,"
+        "    req_src_hash TINYINT UNSIGNED DEFAULT NULL,"
+        "    req_mac INT UNSIGNED DEFAULT NULL,"
+        "    req_cipher_len INT UNSIGNED DEFAULT NULL,"
+        "    grp_txt_valid TINYINT(1) DEFAULT NULL,"
+        "    grp_channel_hash TINYINT UNSIGNED DEFAULT NULL,"
+        "    grp_mac INT UNSIGNED DEFAULT NULL,"
+        "    grp_decrypt_tried TINYINT(1) DEFAULT NULL,"
+        "    grp_decrypt_ok TINYINT(1) DEFAULT NULL,"
+        "    grp_mac_verified TINYINT(1) DEFAULT NULL,"
+        "    grp_timestamp INT UNSIGNED DEFAULT NULL,"
+        "    grp_txt_type TINYINT UNSIGNED DEFAULT NULL,"
+        "    grp_channel_name VARCHAR(64) DEFAULT NULL,"
+        "    grp_channel_key_hex CHAR(32) DEFAULT NULL,"
+        "    grp_text TEXT DEFAULT NULL,"
+        "    advert_valid TINYINT(1) DEFAULT NULL,"
+        "    advert_public_key_hex CHAR(64) DEFAULT NULL,"
+        "    advert_timestamp INT UNSIGNED DEFAULT NULL,"
+        "    advert_flags TINYINT UNSIGNED DEFAULT NULL,"
+        "    advert_role TINYINT UNSIGNED DEFAULT NULL,"
+        "    advert_has_gps TINYINT(1) DEFAULT NULL,"
+        "    advert_has_ble TINYINT(1) DEFAULT NULL,"
+        "    advert_has_shortcut TINYINT(1) DEFAULT NULL,"
+        "    advert_has_name TINYINT(1) DEFAULT NULL,"
+        "    advert_latitude_e6 INT DEFAULT NULL,"
+        "    advert_longitude_e6 INT DEFAULT NULL,"
+        "    advert_name VARCHAR(128) DEFAULT NULL,"
+        "    PRIMARY KEY (id),"
+        "    KEY idx_meshcore_monitor_created_at (created_at),"
+        "    KEY idx_meshcore_monitor_source_code (source, push_code),"
+        "    KEY idx_meshcore_monitor_pkt_hash (pkt_hash),"
+        "    KEY idx_meshcore_monitor_payload_type (payload_type),"
+        "    KEY idx_meshcore_monitor_advert_public_key (advert_public_key_hex),"
+        "    KEY idx_meshcore_monitor_grp_channel (grp_channel_hash)"
+        ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4";
     return Execute(sqlNodes)
         && Execute(sqlRepeaterNodes)
         && Execute(sqlTxOutbox)
@@ -677,6 +736,7 @@ bool MeshDB::EnsureSchema()
         && Execute(sqlRxLogMessages)
         && Execute(sqlCompanionConfig)
         && Execute(sqlCompanionRadioStatus)
+        && Execute(sqlMeshcoreMonitor)
         && Execute(sqlDiscoverJobs)
         && Execute(sqlCompanionActions)
         && Execute(sqlDiscoverResults);
@@ -1759,6 +1819,7 @@ bool MeshDB::ClearAllTables()
     }
 
     bool ok =
+        Execute("TRUNCATE TABLE meshcore_monitor") &&
         Execute("TRUNCATE TABLE discover_results") &&
         Execute("TRUNCATE TABLE discover_jobs") &&
         Execute("TRUNCATE TABLE nodes") &&
@@ -3085,6 +3146,125 @@ bool MeshDB::StorePushRxLog(const DataConnector::PushRxLogInfo& info, const std:
 
     (void)summary;
     return true;
+}
+
+
+bool MeshDB::StoreMeshcoreMonitor(const MonitorRecord& record)
+{
+    std::lock_guard<std::mutex> lock(s_mutex);
+
+    if (!s_ready)
+    {
+        return false;
+    }
+
+    const MeshRxLogDecoder::DecodedPacket* pkt = record.packet;
+    const std::string payloadHex = MeshRxLogDecoder::BytesToHex(record.payload);
+
+    auto sqlBool = [](bool value) -> const char*
+    {
+        return value ? "1" : "0";
+    };
+
+    std::ostringstream sql;
+
+    sql
+        << "INSERT INTO meshcore_monitor ("
+        << "source, push_code, payload_len, payload_hex, "
+        << "packet_valid, decode_error, snr_db, rssi_dbm, route_type, payload_type, payload_version, "
+        << "path_len, path_hash_size, path_text, pkt_hash, rf_packet_hex, pkt_payload_len, pkt_payload_hex, "
+        << "req_valid, req_dst_hash, req_src_hash, req_mac, req_cipher_len, "
+        << "grp_txt_valid, grp_channel_hash, grp_mac, grp_decrypt_tried, grp_decrypt_ok, grp_mac_verified, "
+        << "grp_timestamp, grp_txt_type, grp_channel_name, grp_channel_key_hex, grp_text, "
+        << "advert_valid, advert_public_key_hex, advert_timestamp, advert_flags, advert_role, "
+        << "advert_has_gps, advert_has_ble, advert_has_shortcut, advert_has_name, "
+        << "advert_latitude_e6, advert_longitude_e6, advert_name"
+        << ") VALUES ("
+        << ToSqlString(record.source) << ", "
+        << unsigned(record.pushCode) << ", "
+        << record.payload.size() << ", "
+        << (payloadHex.empty() ? "NULL" : ToSqlString(payloadHex)) << ", ";
+
+    if (pkt == nullptr)
+    {
+        sql
+            << "NULL, NULL, NULL, NULL, NULL, NULL, NULL, "
+            << "NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, "
+            << "NULL, NULL, NULL, NULL, NULL, "
+            << "NULL, NULL, NULL, NULL, NULL, NULL, "
+            << "NULL, NULL, NULL, NULL, NULL, "
+            << "NULL, NULL, NULL, NULL, NULL, "
+            << "NULL, NULL, NULL, NULL, "
+            << "NULL, NULL, NULL";
+    }
+    else
+    {
+        const std::string pathText = MeshRxLogDecoder::FormatPath(*pkt);
+        const std::string rfPacketHex = MeshRxLogDecoder::BytesToHex(pkt->rfPacket);
+        const std::string pktPayloadHex = MeshRxLogDecoder::BytesToHex(pkt->pktPayload);
+        const std::string advertPublicKeyHex = MeshRxLogDecoder::BytesToHex(pkt->advertPublicKey);
+
+        sql
+            << sqlBool(pkt->valid) << ", "
+            << (pkt->decodeError.empty() ? "NULL" : ToSqlString(pkt->decodeError)) << ", "
+            << pkt->snrDb << ", "
+            << int(pkt->rssiDbm) << ", "
+            << unsigned(pkt->routeType) << ", "
+            << unsigned(pkt->payloadType) << ", "
+            << unsigned(pkt->payloadVersion) << ", "
+            << unsigned(pkt->pathLen) << ", "
+            << unsigned(pkt->pathHashSize) << ", "
+            << (pathText.empty() ? "NULL" : ToSqlString(pathText)) << ", "
+            << pkt->pktHash << ", "
+            << (rfPacketHex.empty() ? "NULL" : ToSqlString(rfPacketHex)) << ", "
+            << pkt->pktPayload.size() << ", "
+            << (pktPayloadHex.empty() ? "NULL" : ToSqlString(pktPayloadHex)) << ", "
+            << sqlBool(pkt->reqValid) << ", "
+            << unsigned(pkt->reqDstHash) << ", "
+            << unsigned(pkt->reqSrcHash) << ", "
+            << pkt->reqMac << ", "
+            << pkt->reqCipherText.size() << ", "
+            << sqlBool(pkt->grpTxtValid) << ", "
+            << unsigned(pkt->grpChannelHash) << ", "
+            << pkt->grpMac << ", "
+            << sqlBool(pkt->grpDecryptTried) << ", "
+            << sqlBool(pkt->grpDecryptOk) << ", "
+            << sqlBool(pkt->grpMacVerified) << ", "
+            << pkt->grpTimestamp << ", "
+            << unsigned(pkt->grpTxtType) << ", "
+            << (pkt->grpResolvedChannelName.empty() ? "NULL" : ToSqlString(pkt->grpResolvedChannelName)) << ", "
+            << (pkt->grpResolvedChannelKeyHex.empty() ? "NULL" : ToSqlString(pkt->grpResolvedChannelKeyHex)) << ", "
+            << (pkt->grpText.empty() ? "NULL" : ToSqlString(pkt->grpText)) << ", "
+            << sqlBool(pkt->advertValid) << ", "
+            << (advertPublicKeyHex.empty() ? "NULL" : ToSqlString(advertPublicKeyHex)) << ", "
+            << pkt->advertTimestamp << ", "
+            << unsigned(pkt->advertFlags) << ", "
+            << unsigned(pkt->advertRole) << ", "
+            << sqlBool(pkt->advertHasGps) << ", "
+            << sqlBool(pkt->advertHasBle) << ", "
+            << sqlBool(pkt->advertHasShortcut) << ", "
+            << sqlBool(pkt->advertHasName) << ", "
+            << (pkt->advertLocationValid ? std::to_string(pkt->advertLatitudeE6) : "NULL") << ", "
+            << (pkt->advertLocationValid ? std::to_string(pkt->advertLongitudeE6) : "NULL") << ", "
+            << (pkt->advertName.empty() ? "NULL" : ToSqlString(pkt->advertName));
+    }
+
+    sql << ")";
+
+    if (!Execute(sql.str()))
+    {
+        return false;
+    }
+
+    return Execute(
+        "DELETE FROM meshcore_monitor "
+        "WHERE id NOT IN ("
+        "    SELECT id FROM ("
+        "        SELECT id FROM meshcore_monitor "
+        "        ORDER BY id DESC "
+        "        LIMIT 1000"
+        "    ) keep_rows"
+        ")");
 }
 
 std::vector<std::string> MeshDB::ListNodeNamesMissingAdvertLocation()

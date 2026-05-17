@@ -4,7 +4,6 @@ const CONTACT_READ_STORAGE_KEY = "meshcore.contactLastReadEpoch";
 const PATH_DISPLAY_SETTINGS_STORAGE_KEY = "meshcore.pathDisplaySettings";
 const NOTIFICATION_AUDIO_ENABLED_STORAGE_KEY = "meshcore.notificationAudioEnabled";
 const MONITOR_VISIBLE_COLUMNS_STORAGE_KEY = "meshcore.monitorVisibleColumns.v2";
-const MONITOR_COLUMN_WIDTHS_STORAGE_KEY = "meshcore.monitorColumnWidths.v1";
 const MONITOR_REFRESH_INTERVAL_MS = 2000;
 
 const MeshCoreShared = window.MeshCoreShared;
@@ -289,7 +288,6 @@ const state =
     monitorTable: null,
     monitorRows: [],
     monitorVisibleColumns: null,
-    monitorColumnWidths: null,
     monitorRefreshTimer: null,
     monitorRefreshBusy: false,
     monitorLastId: 0,
@@ -2685,113 +2683,6 @@ function saveMonitorVisibleColumns()
     }
 }
 
-function loadMonitorColumnWidths()
-{
-    try
-    {
-        const parsed = JSON.parse(localStorage.getItem(MONITOR_COLUMN_WIDTHS_STORAGE_KEY) || "null");
-
-        if (parsed && typeof parsed === "object" && !Array.isArray(parsed))
-        {
-            const widths = {};
-
-            Object.keys(parsed).forEach(function(field)
-            {
-                const width = Number(parsed[field]);
-
-                if (MONITOR_COLUMNS.includes(field) && Number.isFinite(width) && width >= 40)
-                {
-                    widths[field] = Math.round(width);
-                }
-            });
-
-            return widths;
-        }
-    }
-    catch (err)
-    {
-        // localStorage may be disabled/private. Use default widths.
-    }
-
-    return {};
-}
-
-function saveMonitorColumnWidths()
-{
-    try
-    {
-        localStorage.setItem(
-            MONITOR_COLUMN_WIDTHS_STORAGE_KEY,
-            JSON.stringify(state.monitorColumnWidths || {})
-        );
-    }
-    catch (err)
-    {
-        // localStorage may be disabled/private. Ignore and keep current session state.
-    }
-}
-
-function rememberMonitorColumnWidth(column)
-{
-    if (!column || typeof column.getField !== "function" || typeof column.getWidth !== "function")
-    {
-        return;
-    }
-
-    const field = column.getField();
-    const width = Number(column.getWidth());
-
-    if (!MONITOR_COLUMNS.includes(field) || !Number.isFinite(width) || width < 40)
-    {
-        return;
-    }
-
-    if (!state.monitorColumnWidths)
-    {
-        state.monitorColumnWidths = loadMonitorColumnWidths();
-    }
-
-    state.monitorColumnWidths[field] = Math.round(width);
-    saveMonitorColumnWidths();
-}
-
-function applyMonitorColumnWidths()
-{
-    if (!state.monitorTable)
-    {
-        return;
-    }
-
-    if (!state.monitorColumnWidths)
-    {
-        state.monitorColumnWidths = loadMonitorColumnWidths();
-    }
-
-    Object.keys(state.monitorColumnWidths).forEach(function(field)
-    {
-        const width = Number(state.monitorColumnWidths[field]);
-
-        if (!Number.isFinite(width) || width < 40)
-        {
-            return;
-        }
-
-        try
-        {
-            const column = state.monitorTable.getColumn(field);
-
-            if (column && typeof column.setWidth === "function")
-            {
-                column.setWidth(width);
-            }
-        }
-        catch (err)
-        {
-            // The column may be hidden or not rendered yet. Try again on the next refresh/redraw.
-        }
-    });
-}
-
 function formatMonitorHexNumber(value, width)
 {
     if (value === null || value === undefined || value === "")
@@ -2831,7 +2722,7 @@ function formatMonitorPayloadType(value)
         return hex + "\nUNKNOWN";
     }
 
-    return hex + " " + name;
+    return hex + "\n" + name;
 }
 
 function formatMonitorRow(row)
@@ -2914,14 +2805,13 @@ function scrollMonitorToNewest()
 function buildMonitorColumnDefinition(field)
 {
     const isLongText = /hex$/.test(field) || field === "payload_hex" || field === "rf_packet_hex" || field === "pkt_payload_hex";
-    const savedWidth = state.monitorColumnWidths ? Number(state.monitorColumnWidths[field]) : NaN;
 
     return {
         title: field,
         field: field,
         headerSort: true,
         visible: state.monitorVisibleColumns.includes(field),
-        width: Number.isFinite(savedWidth) && savedWidth >= 40 ? savedWidth : (isLongText ? 260 : undefined),
+        width: isLongText ? 260 : undefined,
         minWidth: isLongText ? 180 : 90,
         formatter: "plaintext"
     };
@@ -2977,7 +2867,6 @@ function renderMonitorColumnToolbar()
                 if (input.checked)
                 {
                     state.monitorTable.showColumn(field);
-                    applyMonitorColumnWidths();
                 }
                 else
                 {
@@ -2985,7 +2874,6 @@ function renderMonitorColumnToolbar()
                 }
 
                 state.monitorTable.redraw(true);
-                applyMonitorColumnWidths();
             }
         });
     });
@@ -3003,17 +2891,12 @@ function ensureMonitorTable()
         state.monitorVisibleColumns = loadMonitorVisibleColumns();
     }
 
-    if (!state.monitorColumnWidths)
-    {
-        state.monitorColumnWidths = loadMonitorColumnWidths();
-    }
-
     if (!state.monitorTable)
     {
         state.monitorTable = new Tabulator("#monitorTable",
         {
             data: [],
-            layout: "fitData",
+            layout: "fitDataStretch",
             height: "100%",
             index: "id",
             movableColumns: true,
@@ -3024,9 +2907,6 @@ function ensureMonitorTable()
             },
             columns: MONITOR_COLUMNS.map(buildMonitorColumnDefinition)
         });
-
-        state.monitorTable.on("columnResized", rememberMonitorColumnWidth);
-        state.monitorTable.on("tableBuilt", applyMonitorColumnWidths);
     }
 
     return state.monitorTable;
@@ -3069,7 +2949,6 @@ async function refreshMonitor(autoScrollOnNewData)
         setRightPanelHeader("Monitor", rows.length + " Zeilen aus meshcore_monitor");
         await monitorTable.replaceData(rows);
         monitorTable.redraw(true);
-        applyMonitorColumnWidths();
 
         if (autoScrollOnNewData && hasNewRows && wasAtTop)
         {

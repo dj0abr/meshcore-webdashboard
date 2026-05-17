@@ -1,0 +1,58 @@
+diff -ruN update4_base/app.js update4_work/app.js
+--- update4_base/app.js	2026-05-14 16:43:53.170511741 +0000
++++ update4_work/app.js	2026-05-14 17:20:11.973186190 +0000
+@@ -2871,7 +2871,7 @@
+         state.monitorTable = new Tabulator("#monitorTable",
+         {
+             data: [],
+-            layout: "fitDataStretch",
++            layout: "fitData",
+             height: "100%",
+             index: "id",
+             movableColumns: true,
+diff -ruN update4_base/index.html update4_work/index.html
+--- update4_base/index.html	2026-05-14 16:43:53.171334559 +0000
++++ update4_work/index.html	2026-05-14 17:20:11.969470766 +0000
+@@ -1635,6 +1635,9 @@
+         .monitor-view
+         {
+             min-height: 0;
++            min-width: 0;
++            width: 100%;
++            max-width: 100%;
+             flex: 1;
+             display: flex;
+             flex-direction: column;
+@@ -1679,18 +1682,29 @@
+         {
+             flex: 1;
+             min-height: 0;
++            min-width: 0;
++            width: 100%;
++            max-width: 100%;
+             height: 100%;
+-            overflow-x: auto;
+-            overflow-y: hidden;
++            overflow: hidden;
++        }
++
++        #monitorTable .tabulator
++        {
++            max-width: 100%;
++            overflow: hidden;
+         }
+ 
+         #monitorTable .tabulator-tableholder
+         {
+-            overflow-x: auto !important;
++            overflow-x: scroll !important;
++            overflow-y: auto !important;
++            scrollbar-gutter: stable both-edges;
+         }
+ 
+         #monitorTable .tabulator-table
+         {
++            width: max-content !important;
+             min-width: max-content;
+         }
+ </style>

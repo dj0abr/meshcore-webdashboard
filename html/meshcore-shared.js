@@ -687,6 +687,8 @@ function pruneImplausibleResolvedHops(resolvedFromBack, endpoint)
 
 const MAX_ROUTE_CANDIDATES_PER_HOP = 80;
 const SAME_REPEATER_PENALTY_M = 500000.0;
+const ENDPOINT_ANCHOR_LAST_HOP_WEIGHT = 1.5;
+const ENDPOINT_ANCHOR_SECOND_LAST_HOP_WEIGHT = 0.6;
 const VERY_LARGE_ROUTE_COST = 1e18;
 
 function normalizeRoutePoint(point, kind, nameFallback)
@@ -806,7 +808,34 @@ function sameRepeaterPenalty(a, b)
     return 0.0;
 }
 
-function buildRouteCandidatesForHop(hop, hopIndex, sourcePoint, endpointPoint)
+function endpointAnchorPenaltyMeters(candidate, hopIndex, hopCount, endpointPoint)
+{
+    if (!candidate || !endpointPoint || hopCount <= 0)
+    {
+        return 0.0;
+    }
+
+    const distanceToEndpointM = routeCandidateToPointDistanceMeters(candidate, endpointPoint);
+
+    if (!Number.isFinite(distanceToEndpointM) || distanceToEndpointM >= VERY_LARGE_ROUTE_COST)
+    {
+        return 0.0;
+    }
+
+    if (hopIndex === hopCount - 1)
+    {
+        return distanceToEndpointM * ENDPOINT_ANCHOR_LAST_HOP_WEIGHT;
+    }
+
+    if (hopIndex === hopCount - 2)
+    {
+        return distanceToEndpointM * ENDPOINT_ANCHOR_SECOND_LAST_HOP_WEIGHT;
+    }
+
+    return 0.0;
+}
+
+function buildRouteCandidatesForHop(hop, hopIndex, hopCount, sourcePoint, endpointPoint)
 {
     const matches = Array.isArray(hop.matches) ? hop.matches : [];
 
@@ -822,8 +851,12 @@ function buildRouteCandidatesForHop(hop, hopIndex, sourcePoint, endpointPoint)
 
     candidates.sort(function(a, b)
     {
-        const aScore = routePointToCandidateDistanceMeters(sourcePoint, a) + routeCandidateToPointDistanceMeters(a, endpointPoint);
-        const bScore = routePointToCandidateDistanceMeters(sourcePoint, b) + routeCandidateToPointDistanceMeters(b, endpointPoint);
+        const aScore = routePointToCandidateDistanceMeters(sourcePoint, a)
+            + routeCandidateToPointDistanceMeters(a, endpointPoint)
+            + endpointAnchorPenaltyMeters(a, hopIndex, hopCount, endpointPoint);
+        const bScore = routePointToCandidateDistanceMeters(sourcePoint, b)
+            + routeCandidateToPointDistanceMeters(b, endpointPoint)
+            + endpointAnchorPenaltyMeters(b, hopIndex, hopCount, endpointPoint);
 
         return aScore - bScore;
     });
@@ -883,7 +916,7 @@ function resolvePathBestRoute(pathEntry, endpoint, source)
 
     const layers = hops.map(function(hop, hopIndex)
     {
-        return buildRouteCandidatesForHop(hop, hopIndex, sourcePoint, endpointPoint);
+        return buildRouteCandidatesForHop(hop, hopIndex, hops.length, sourcePoint, endpointPoint);
     });
 
     const hasMissingLayer = layers.some(function(layer)
@@ -906,7 +939,8 @@ function resolvePathBestRoute(pathEntry, endpoint, source)
     {
         return {
             candidate: candidate,
-            cost: routePointToCandidateDistanceMeters(sourcePoint, candidate),
+            cost: routePointToCandidateDistanceMeters(sourcePoint, candidate)
+                + endpointAnchorPenaltyMeters(candidate, 0, hops.length, endpointPoint),
             previous_index: -1
         };
     });
@@ -925,7 +959,9 @@ function resolvePathBestRoute(pathEntry, endpoint, source)
             {
                 const transitionCost = routeCandidateDistanceMeters(previousState.candidate, candidate)
                     + sameRepeaterPenalty(previousState.candidate, candidate);
-                const totalCost = previousState.cost + transitionCost;
+                const totalCost = previousState.cost
+                    + transitionCost
+                    + endpointAnchorPenaltyMeters(candidate, layerIndex, hops.length, endpointPoint);
 
                 if (totalCost < bestCost)
                 {
@@ -1051,6 +1087,8 @@ function resolvePathGreedyFromEndpoint(pathEntry, endpoint)
         const hop = hops[hopIndex];
         const matches = Array.isArray(hop.matches) ? hop.matches : [];
 
+        const hopCount = hops.length;
+
         const matchesWithDistance = matches.map(function(match)
         {
             const candidate =
@@ -1070,6 +1108,18 @@ function resolvePathGreedyFromEndpoint(pathEntry, endpoint)
                     referencePoint.lon_e6,
                     candidate.adv_lat_e6,
                     candidate.adv_lon_e6
+                );
+
+                candidate.anchor_penalty_m = endpointAnchorPenaltyMeters(
+                    candidate,
+                    hopIndex,
+                    hopCount,
+                    {
+                        kind: "endpoint",
+                        name: endpoint.name || "endpoint",
+                        lat_e6: Number(endpoint.latitude_e6),
+                        lon_e6: Number(endpoint.longitude_e6)
+                    }
                 );
             }
 
@@ -1117,7 +1167,8 @@ function resolvePathGreedyFromEndpoint(pathEntry, endpoint)
 
         candidatesWithCoords.sort(function(a, b)
         {
-            return a.distance_m - b.distance_m;
+            return (a.distance_m + (a.anchor_penalty_m || 0.0))
+                - (b.distance_m + (b.anchor_penalty_m || 0.0));
         });
 
         const selected = candidatesWithCoords[0];

@@ -8,6 +8,8 @@
 #include <ctime>
 #include <algorithm>
 #include <cctype>
+#include <array>
+#include <random>
 
 namespace
 {
@@ -168,8 +170,14 @@ static std::string ExtractSenderName(const std::string& text)
     return text.substr(0, pos);
 }
 
-void MessageRouter::HandleTestChannelMessage(const MeshCoreClient::RxMessage& msg)
+/*void MessageRouter::HandleTestChannelMessage(const MeshCoreClient::RxMessage& msg)
 {
+return;
+
+
+
+
+
     std::cout << "[#test] " << msg.text << "\n";
 
     if (!IsTestCommand(msg.text)) return;
@@ -191,6 +199,100 @@ void MessageRouter::HandleTestChannelMessage(const MeshCoreClient::RxMessage& ms
     std::string reply =                 "";
     if (!senderName.empty()) reply +=   "@[" + senderName + "] 🏓 Pong: " + locName;
     reply +=                            " | Hops: " + std::to_string(static_cast<unsigned>(msg.pathLen));
+
+    if (!MeshDB::EnqueueChannelTxFromBot(msg.channelIdx, reply))
+    {
+        std::cout << "[#test] enqueue auto reply failed\n";
+        return;
+    }
+
+    std::cout << "[#test] auto reply queued: " << reply << "\n";   
+}
+*/
+
+void MessageRouter::HandleTestChannelMessage(const MeshCoreClient::RxMessage& msg)
+{
+return; // auskommentieren um den Pong-Bot zu aktivieren
+
+    std::cout << "[#test] " << msg.text << "\n";
+
+    if (!IsTestCommand(msg.text))
+    {
+        return;
+    }
+
+    // keine Ping Flood zulassen
+    static std::time_t lastReply = 0;
+
+    const std::time_t now = std::time(nullptr);
+
+    if ((now - lastReply) < 10)
+    {
+        std::cout << "[#test] auto reply suppressed by cooldown\n";
+        return;
+    }
+
+    lastReply = now;
+
+    const std::string senderName = ExtractSenderName(msg.text);
+    const std::string locName    = MeshDB::GetCompanionLocationName();
+
+    static const std::array<std::string, 20> replies =
+    {
+        "du bist gehört in {loc} mit {hops} hops",
+        "Hallo {sendername}, klappt bis {loc} mit {hops} hops",
+        "{sendername}, kommst hier in {loc} gut an",
+        "hier in {loc} alles lesbar",
+        "Signal in {loc} sauber angekommen",
+        "kommt gut rüber nach {loc}",
+        "{sendername}, in {loc} noch gut verständlich",
+        "läuft bis {loc} stabil",
+        "hier in {loc} problemlos empfangen",
+        "empfang in {loc} bestätigt",
+        "kommt hier in {loc} noch ordentlich an, {sendername}",
+        "alles gut bis {loc}",
+        "hier aus {loc}, passt",
+        "sauber durch bis {loc}",
+        "in {loc} gut angekommen mit {hops} hops",
+        "{sendername}, lese dich hier in {loc}",
+        "bis {loc} noch voll ok, hast {hops} hops",
+        "hier in {loc} ohne probleme empfangen",
+        "signal kam hier in {loc} an",
+        "{sendername}, in {loc} alles gut lesbar, hat {hops} x gehoppt"
+    };
+
+    // Zufallsgenerator
+    static std::random_device rd;
+    static std::mt19937 rng(rd());
+
+    std::uniform_int_distribution<std::size_t> dist(0, replies.size() - 1);
+
+    std::string reply = replies[dist(rng)];
+
+    // Platzhalter ersetzen
+    auto ReplaceAll =
+    [](std::string& str, const std::string& from, const std::string& to)
+    {
+        std::size_t pos = 0;
+
+        while ((pos = str.find(from, pos)) != std::string::npos)
+        {
+            str.replace(pos, from.length(), to);
+            pos += to.length();
+        }
+    };
+
+    ReplaceAll(reply, "{loc}",  locName);
+    ReplaceAll(reply, "{hops}", std::to_string(static_cast<unsigned>(msg.pathLen)));
+
+    if (!senderName.empty())
+    {
+        ReplaceAll(reply, "{sendername}", senderName);
+    }
+    else
+    {
+        ReplaceAll(reply, "{sendername}", " ");
+    }
 
     if (!MeshDB::EnqueueChannelTxFromBot(msg.channelIdx, reply))
     {

@@ -1635,9 +1635,6 @@
         .monitor-view
         {
             min-height: 0;
-            min-width: 0;
-            width: 100%;
-            max-width: 100%;
             flex: 1;
             display: flex;
             flex-direction: column;
@@ -1682,29 +1679,18 @@
         {
             flex: 1;
             min-height: 0;
-            min-width: 0;
-            width: 100%;
-            max-width: 100%;
             height: 100%;
-            overflow: hidden;
-        }
-
-        #monitorTable .tabulator
-        {
-            max-width: 100%;
-            overflow: hidden;
+            overflow-x: auto;
+            overflow-y: hidden;
         }
 
         #monitorTable .tabulator-tableholder
         {
-            overflow-x: scroll !important;
-            overflow-y: auto !important;
-            scrollbar-gutter: stable both-edges;
+            overflow-x: auto !important;
         }
 
         #monitorTable .tabulator-table
         {
-            width: max-content !important;
             min-width: max-content;
         }
 

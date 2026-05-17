@@ -21,9 +21,16 @@ MeshRxLogDecoder::DecodedPacket MeshRxLogDecoder::Decode(const std::vector<uint8
     pkt.rawBytes = payload;
     pkt.originalHex = BytesToHex(payload);
 
-    DecodeBytes(pkt, resolvedFromName);
+    try
+    {
+        DecodeBytes(pkt, resolvedFromName);
+    }
+    catch (const std::exception &ex)
+    {
+        pkt.valid = false;
+        pkt.decodeError = ex.what();
+    }
 
-    pkt.valid = true;
     return pkt;
 }
 
@@ -431,6 +438,7 @@ void MeshRxLogDecoder::DecodeRfPacket(DecodedPacket &pkt)
                   << std::endl;
 
         pkt.valid = false;
+        pkt.decodeError = "RF-Paket zu kurz";
         return;
     }
 
@@ -454,6 +462,7 @@ void MeshRxLogDecoder::DecodeRfPacket(DecodedPacket &pkt)
                   << std::endl;
 
         pkt.valid = false;
+        pkt.decodeError = "Reservierter/ungueltiger pathHashSizeCode=3";
         return;
     }
 
@@ -474,6 +483,7 @@ void MeshRxLogDecoder::DecodeRfPacket(DecodedPacket &pkt)
                   << std::endl;
 
         pkt.valid = false;
+        pkt.decodeError = "RF-Paket enthaelt nicht genug Bytes fuer den Pfad";
         return;
     }
 
@@ -505,6 +515,8 @@ void MeshRxLogDecoder::DecodeRfPacket(DecodedPacket &pkt)
     {
         DecodeReqPayload(pkt);
     }
+
+    pkt.valid = true;
 }
 
 void MeshRxLogDecoder::DecodeAdvertPayload(DecodedPacket &pkt)

@@ -2,6 +2,7 @@
 #define MESHDB_H
 
 #include "DataConnector.h"
+#include "MeshRxLogDecoder.h"
 
 #include <mariadb/mysql.h>
 
@@ -171,6 +172,14 @@ public:
         std::string resultJson;
     };
 
+    struct MonitorRecord
+    {
+        std::string source;
+        uint8_t pushCode = 0;
+        std::vector<uint8_t> payload;
+        const MeshRxLogDecoder::DecodedPacket* packet = nullptr;
+    };
+
     static bool CreateDiscoverJob(
         uint8_t typeFilter,
         const std::string& requestedBy,
@@ -301,6 +310,7 @@ public:
     static bool MarkChannelDeletePending(uint8_t channelIdx);
     static bool MarkChannelDeletePendingByKeyHex(const std::string& keyHex);
     static bool StorePushRxLog(const DataConnector::PushRxLogInfo& info, const std::string& summary);
+    static bool StoreMeshcoreMonitor(const MonitorRecord& record);
     static std::vector<std::string> ListNodeNamesMissingAdvertLocation();
     static bool UpdateNodeAdvertLocationByName(
         const std::string& name,

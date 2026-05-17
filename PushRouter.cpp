@@ -4,6 +4,7 @@
 #include "MeshCoreProto.h"
 #include "MeshDB.h"
 #include "MeshRxLogDecoder.h"
+#include "MeshcoreMonitor.h"
 #include "MessageCorrelation.h"
 
 #include <array>
@@ -20,6 +21,39 @@ PushRouter::PushRouter(MeshCoreClient& client, AppRuntime& runtime)
 {
 }
 
+namespace
+{
+    bool IsMonitorLoggedInHandler(uint8_t code)
+    {
+        return code == MeshCoreProto::PUSH_CODE_RX_LOG_DATA;
+    }
+
+    bool IsKnownPushCode(uint8_t code)
+    {
+        switch (code)
+        {
+            case MeshCoreProto::PUSH_CODE_ADVERT:
+            case MeshCoreProto::PUSH_CODE_PATH_UPDATED:
+            case MeshCoreProto::PUSH_CODE_SEND_CONFIRMED:
+            case MeshCoreProto::PUSH_CODE_MSG_WAITING:
+            case MeshCoreProto::PUSH_CODE_RAW_DATA:
+            case MeshCoreProto::PUSH_CODE_LOGIN_SUCCESS:
+            case MeshCoreProto::PUSH_CODE_LOGIN_FAIL:
+            case MeshCoreProto::PUSH_CODE_STATUS_RESPONSE:
+            case MeshCoreProto::PUSH_CODE_RX_LOG_DATA:
+            case MeshCoreProto::PUSH_CODE_TRACE_DATA:
+            case MeshCoreProto::PUSH_CODE_NEW_ADVERT:
+            case MeshCoreProto::PUSH_CODE_TELEMETRY_RESPONSE:
+            case MeshCoreProto::PUSH_CODE_BINARY_RESPONSE:
+            case MeshCoreProto::PUSH_CODE_CONTROL_DATA:
+                return true;
+
+            default:
+                return false;
+        }
+    }
+}
+
 void PushRouter::Attach()
 {
     m_client.setPushCallback(
@@ -32,6 +66,11 @@ void PushRouter::Attach()
 void PushRouter::HandlePush(uint8_t code, const std::vector<uint8_t>& payload)
 {
     //if(code >= 0x80) printf("********************************* [HandlePush] code: %02X\n",code);
+
+    if (IsKnownPushCode(code) && !IsMonitorLoggedInHandler(code))
+    {
+        MeshcoreMonitor("PUSH", code, payload, nullptr);
+    }
 
     switch (code)
     {
@@ -237,6 +276,7 @@ void PushRouter::HandleLoginFail(const std::vector<uint8_t>& payload)
 static bool g_rxLogDebug = false;
 #define RXDBG(x) do { if (g_rxLogDebug) { x; } } while (0)
 
+
 void PushRouter::HandleLogRxData(const std::vector<uint8_t>& payload)
 {
     RXDBG(std::cout << "[DEBUG RX_LOG] HandleLogRxData called" << std::endl);
@@ -253,6 +293,13 @@ void PushRouter::HandleLogRxData(const std::vector<uint8_t>& payload)
 
     const MeshRxLogDecoder::DecodedPacket pkt =
         MeshRxLogDecoder::Decode(payload);
+
+    MeshcoreMonitor(
+        "PUSH RX_LOG",
+        MeshCoreProto::PUSH_CODE_RX_LOG_DATA,
+        payload,
+        &pkt
+    );
 
     RXDBG(std::cout << "[DEBUG RX_LOG] Decode result:" << std::endl);
     RXDBG(std::cout << "  valid=" << pkt.valid << std::endl);
@@ -312,9 +359,11 @@ void PushRouter::HandleLogRxData(const std::vector<uint8_t>& payload)
     RXDBG(std::cout << "  advertName=" << pkt.advertName << std::endl);
 
     if (pkt.payloadType != MeshCoreProto::PAYLOAD_TYPE_GRP_TXT &&
-        pkt.payloadType != MeshCoreProto::PAYLOAD_TYPE_ADVERT)
+        pkt.payloadType != MeshCoreProto::PAYLOAD_TYPE_ADVERT &&
+        pkt.payloadType != MeshCoreProto::PAYLOAD_TYPE_TXT_MSG)
     {
-        std::cout << "[DEBUG RX_LOG] DROP: payloadType != 4 bzw. 5" << std::endl; // bleibt immer sichtbar
+        std::cout << "[DEBUG RX_LOG] DROP: unsupported payloadType"
+                << std::endl;
         return;
     }
 

@@ -180,6 +180,11 @@
         return await fetchJson("channels.php", noStoreGet());
     }
 
+    async function loadMonitor()
+    {
+        return await fetchJson(withCacheBuster("monitor.php"), noStoreGet());
+    }
+
     async function saveChannel(payload)
     {
         return await fetchJson("save_channel.php", postJson(payload));
@@ -229,6 +234,7 @@
         sendMessage,
         sendFloodAdvert,
         loadChannels,
+        loadMonitor,
         saveChannel,
         deleteChannel,
         loadCompanionSetup,

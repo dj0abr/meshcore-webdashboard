@@ -11,6 +11,7 @@ public:
     struct DecodedPacket
     {
         bool valid = false;
+        std::string decodeError;
 
         std::string originalHex;
         std::vector<uint8_t> rawBytes;

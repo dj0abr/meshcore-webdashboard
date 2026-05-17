@@ -1,0 +1,119 @@
+--- a/app.js
++++ b/app.js
+@@ -2719,10 +2719,10 @@
+ 
+     if (!name)
+     {
+-        return hex + " UNKNOWN";
++        return hex + "\nUNKNOWN";
+     }
+ 
+-    return hex + " " + name;
++    return hex + "\n" + name;
+ }
+ 
+ function formatMonitorRow(row)
+@@ -2750,14 +2750,39 @@
+     }, 0);
+ }
+ 
++function getMonitorTableHolder()
++{
++    if (!el.monitorTable)
++    {
++        return null;
++    }
++
++    return el.monitorTable.querySelector(".tabulator-tableholder");
++}
++
++function isMonitorScrolledToTop()
++{
++    const tableHolder = getMonitorTableHolder();
++
++    return !tableHolder || tableHolder.scrollTop <= 2;
++}
++
+ function scrollMonitorToNewest()
+ {
++    const tableHolder = getMonitorTableHolder();
++
++    if (tableHolder)
++    {
++        tableHolder.scrollTop = 0;
++        return;
++    }
++
+     if (!state.monitorTable || state.monitorRows.length === 0)
+     {
+         return;
+     }
+ 
+-    const newestRow = state.monitorRows[state.monitorRows.length - 1];
++    const newestRow = state.monitorRows[0];
+ 
+     if (!newestRow || newestRow.id === undefined || newestRow.id === null)
+     {
+@@ -2768,7 +2793,7 @@
+     {
+         try
+         {
+-            state.monitorTable.scrollToRow(newestRow.id, "bottom", false);
++            state.monitorTable.scrollToRow(newestRow.id, "top", false);
+         }
+         catch (err)
+         {
+@@ -2910,6 +2935,9 @@
+     try
+     {
+         const previousLastId = state.monitorLastId;
++        const wasAtTop = isMonitorScrolledToTop();
++        const tableHolder = getMonitorTableHolder();
++        const previousScrollTop = tableHolder ? tableHolder.scrollTop : 0;
+         const data = await MeshCoreApi.loadMonitor();
+         const rows = formatMonitorRows(Array.isArray(data.rows) ? data.rows : []);
+         const newestId = getMonitorLastId(rows);
+@@ -2922,10 +2950,17 @@
+         await monitorTable.replaceData(rows);
+         monitorTable.redraw(true);
+ 
+-        if (autoScrollOnNewData && hasNewRows)
++        if (autoScrollOnNewData && hasNewRows && wasAtTop)
+         {
+             scrollMonitorToNewest();
+         }
++        else if (!wasAtTop && tableHolder)
++        {
++            requestAnimationFrame(function()
++            {
++                tableHolder.scrollTop = previousScrollTop;
++            });
++        }
+     }
+     catch (error)
+     {
+--- a/monitor.php
++++ b/monitor.php
+@@ -122,7 +122,7 @@
+             ORDER BY id DESC
+             LIMIT 1000
+         ) AS latest_rows
+-        ORDER BY id ASC
++        ORDER BY id DESC
+     ');
+ 
+     $rows = [];
+--- a/index.html
++++ b/index.html
+@@ -1693,6 +1693,11 @@
+         {
+             min-width: max-content;
+         }
++
++        #monitorTable .tabulator-cell
++        {
++            white-space: pre-line;
++        }
+ </style>
+ </head>
+ <body>
