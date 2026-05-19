@@ -558,6 +558,7 @@ bool MeshDB::EnsureSchema()
             "    radio_sf TINYINT UNSIGNED NOT NULL,"
             "    radio_cr TINYINT UNSIGNED NOT NULL,"
             "    apply_pending TINYINT(1) NOT NULL DEFAULT 1,"
+            "    bot TINYINT(1) NOT NULL DEFAULT 0,"
             "    last_applied_at DATETIME DEFAULT NULL,"
             "    last_error VARCHAR(255) DEFAULT NULL,"
             "    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,"
@@ -2377,7 +2378,7 @@ std::optional<MeshDB::CompanionConfig> MeshDB::LoadCompanionConfig()
 
     const char* sql =
         "SELECT "
-        "name, latitude_e6, longitude_e6, radio_bw_hz, radio_sf, radio_cr, apply_pending, last_error "
+        "name, latitude_e6, longitude_e6, radio_bw_hz, radio_sf, radio_cr, apply_pending, bot, last_error "
         "FROM companion_config "
         "WHERE id = 1 "
         "LIMIT 1";
@@ -2411,7 +2412,8 @@ std::optional<MeshDB::CompanionConfig> MeshDB::LoadCompanionConfig()
     cfg.radioSf = RowU8(row, 4);
     cfg.radioCr = RowU8(row, 5);
     cfg.applyPending = (RowU8(row, 6) != 0);
-    cfg.lastError = RowNullableStr(row, 7).value_or("");
+    cfg.bot = (RowU8(row, 7) != 0);
+    cfg.lastError = RowNullableStr(row, 8).value_or("");
 
     mysql_free_result(res);
     return cfg;
@@ -2499,6 +2501,48 @@ std::string MeshDB::GetProtectedRepeaterName()
 
     mysql_free_result(res);
     return repeaterName;
+}
+
+bool MeshDB::IsCompanionBotEnabled()
+{
+    std::lock_guard<std::mutex> lock(s_mutex);
+
+    if (!s_ready || (s_conn == nullptr))
+    {
+        return false;
+    }
+
+    const char* sql =
+        "SELECT bot "
+        "FROM companion_config "
+        "WHERE id = 1 "
+        "LIMIT 1";
+
+    if (mysql_query(s_conn, sql) != 0)
+    {
+        std::cerr << "MeshDB SQL error: " << mysql_error(s_conn) << "\n";
+        return false;
+    }
+
+    MYSQL_RES* res = mysql_store_result(s_conn);
+
+    if (res == nullptr)
+    {
+        return false;
+    }
+
+    MYSQL_ROW row = mysql_fetch_row(res);
+
+    if (row == nullptr)
+    {
+        mysql_free_result(res);
+        return false;
+    }
+
+    const bool enabled = (RowU8(row, 0) != 0);
+
+    mysql_free_result(res);
+    return enabled;
 }
 
 bool MeshDB::MarkCompanionConfigApplied()

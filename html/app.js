@@ -229,6 +229,7 @@ const el =
     setupCityInput: document.getElementById("setupCityInput"),
     setupLatInput: document.getElementById("setupLatInput"),
     setupLonInput: document.getElementById("setupLonInput"),
+    setupBotInput: document.getElementById("setupBotInput"),
     setupApplyButton: document.getElementById("setupApplyButton"),
     setupCancelButton: document.getElementById("setupCancelButton"),
     setupModalError: document.getElementById("setupModalError"),
@@ -2059,7 +2060,8 @@ async function saveProtectedRepeaterNameBeforeRequest()
         location_name: cfg.location_name || "",
         protected_repeater_name: homeRepeaterName,
         latitude: latitude,
-        longitude: longitude
+        longitude: longitude,
+        bot: cfg.bot === true || Number(cfg.bot) === 1
     });
 }
 
@@ -5608,6 +5610,11 @@ async function openSetupDialog()
         el.setupLonInput.value = "";
     }
 
+    if (el.setupBotInput)
+    {
+        el.setupBotInput.checked = false;
+    }
+
     try
     {
         const data = await loadCompanionSetup();
@@ -5639,6 +5646,11 @@ async function openSetupDialog()
                     Number.isFinite(Number(cfg.longitude))
                         ? String(cfg.longitude)
                         : "";
+            }
+
+            if (el.setupBotInput)
+            {
+                el.setupBotInput.checked = cfg.bot === true || Number(cfg.bot) === 1;
             }
         }
     }
@@ -5708,6 +5720,7 @@ async function applyCompanionSetup()
     const homeRepeaterName = cfg && cfg.protected_repeater_name ? String(cfg.protected_repeater_name).trim() : "";
     const latText = el.setupLatInput ? el.setupLatInput.value.trim() : "";
     const lonText = el.setupLonInput ? el.setupLonInput.value.trim() : "";
+    const botEnabled = el.setupBotInput ? el.setupBotInput.checked : false;
 
     const latitude = Number(latText);
     const longitude = Number(lonText);
@@ -5743,7 +5756,8 @@ async function applyCompanionSetup()
         location_name: locationName,
         protected_repeater_name: homeRepeaterName,
         latitude: latitude,
-        longitude: longitude
+        longitude: longitude,
+        bot: botEnabled
     });
 }
 

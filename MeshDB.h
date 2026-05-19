@@ -123,6 +123,7 @@ public:
         uint8_t radioSf = 8;
         uint8_t radioCr = 8;
         bool applyPending = false;
+        bool bot = false;
         std::string lastError;
     };
 
@@ -293,6 +294,7 @@ public:
     static std::optional<CompanionConfig> LoadCompanionConfig();
     static std::string GetCompanionLocationName();
     static std::string GetProtectedRepeaterName();
+    static bool IsCompanionBotEnabled();
     static bool MarkCompanionConfigApplied();
     static bool MarkCompanionConfigApplyFailed(const std::string& error);
     static bool UpdateDiscoverJobResultCount(

@@ -28,6 +28,7 @@ try
     $protectedRepeaterName = trim((string) ($data['protected_repeater_name'] ?? ''));
     $latitude = (float) ($data['latitude'] ?? 0.0);
     $longitude = (float) ($data['longitude'] ?? 0.0);
+    $bot = !empty($data['bot']) ? 1 : 0;
 
     if ($name === '')
     {
@@ -85,6 +86,7 @@ try
             longitude_e6,
             location_name,
             protected_repeater_name,
+            bot,
             radio_bw_hz,
             radio_sf,
             radio_cr,
@@ -94,6 +96,7 @@ try
         VALUES
         (
             1,
+            ?,
             ?,
             ?,
             ?,
@@ -111,6 +114,7 @@ try
             longitude_e6 = VALUES(longitude_e6),
             location_name = VALUES(location_name),
             protected_repeater_name = VALUES(protected_repeater_name),
+            bot = VALUES(bot),
             radio_bw_hz = VALUES(radio_bw_hz),
             radio_sf = VALUES(radio_sf),
             radio_cr = VALUES(radio_cr),
@@ -119,7 +123,7 @@ try
     ";
 
     $stmt = $db->prepare($sql);
-    $stmt->bind_param('siiss', $name, $latitudeE6, $longitudeE6, $locationNameDb, $protectedRepeaterNameDb);
+    $stmt->bind_param('siissi', $name, $latitudeE6, $longitudeE6, $locationNameDb, $protectedRepeaterNameDb, $bot);
     $stmt->execute();
     $stmt->close();
 

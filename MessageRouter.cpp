@@ -170,49 +170,12 @@ static std::string ExtractSenderName(const std::string& text)
     return text.substr(0, pos);
 }
 
-/*void MessageRouter::HandleTestChannelMessage(const MeshCoreClient::RxMessage& msg)
-{
-return;
-
-
-
-
-
-    std::cout << "[#test] " << msg.text << "\n";
-
-    if (!IsTestCommand(msg.text)) return;
-
-    // keine Ping Flood zulassen
-    static std::time_t lastReply = 0;
-    const std::time_t now = std::time(nullptr);
-    if ((now - lastReply) < 10)
-    {
-        std::cout << "[#test] auto reply suppressed by cooldown\n";
-        return;
-    }
-    lastReply = now;
-
-    const std::string senderName = ExtractSenderName(msg.text);
-
-    const std::string locName = MeshDB::GetCompanionLocationName();
-
-    std::string reply =                 "";
-    if (!senderName.empty()) reply +=   "@[" + senderName + "] 🏓 Pong: " + locName;
-    reply +=                            " | Hops: " + std::to_string(static_cast<unsigned>(msg.pathLen));
-
-    if (!MeshDB::EnqueueChannelTxFromBot(msg.channelIdx, reply))
-    {
-        std::cout << "[#test] enqueue auto reply failed\n";
-        return;
-    }
-
-    std::cout << "[#test] auto reply queued: " << reply << "\n";   
-}
-*/
-
 void MessageRouter::HandleTestChannelMessage(const MeshCoreClient::RxMessage& msg)
 {
-return; // auskommentieren um den Pong-Bot zu aktivieren
+    if (!MeshDB::IsCompanionBotEnabled())
+    {
+        return;
+    }
 
     std::cout << "[#test] " << msg.text << "\n";
 
