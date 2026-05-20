@@ -200,7 +200,7 @@ void MessageRouter::HandleTestChannelMessage(const MeshCoreClient::RxMessage& ms
     const std::string senderName = ExtractSenderName(msg.text);
     const std::string locName    = MeshDB::GetCompanionLocationName();
 
-    static const std::array<std::string, 20> replies =
+    static const std::array<std::string, 40> replies =
     {
         "du bist gehört in {loc} mit {hops} hops",
         "Hallo {sendername}, klappt bis {loc} mit {hops} hops",
@@ -221,9 +221,29 @@ void MessageRouter::HandleTestChannelMessage(const MeshCoreClient::RxMessage& ms
         "bis {loc} noch voll ok, hast {hops} hops",
         "hier in {loc} ohne probleme empfangen",
         "signal kam hier in {loc} an",
-        "{sendername}, in {loc} alles gut lesbar, hat {hops} x gehoppt"
-    };
+        "{sendername}, in {loc} alles gut lesbar, hat {hops} x gehoppt",
 
+        "servus aus {loc}, dein signal passt",
+        "{sendername}, hier in {loc} sauber empfangen",
+        "dein paketl is bis {loc} kemma",
+        "läuft guad bis {loc}",
+        "hier in {loc} no richtig guad lesbar",
+        "{sendername}, kommt in {loc} astrein an",
+        "sauberer empfang hier in {loc}",
+        "dein signal hat {hops} hops bis {loc} gebraucht",
+        "hier aus {loc}, alles im grünen bereich",
+        "{sendername}, bist in {loc} no deutlich zu hören",
+        "kommt hier in {loc} guad owe",
+        "signal hier in {loc} ohne aussetzer",
+        "{sendername}, hier in {loc} vui guad verständlich",
+        "läuft sauber ein nach {loc}",
+        "dein signal is in {loc} angekommen",
+        "{sendername}, hier in {loc} passt ois",
+        "bis {loc} noch stabil mit {hops} hops",
+        "hier in {loc}, Empfang top",
+        "kommt locker bis {loc} rüber",
+        "{sendername}, hier in {loc} sauber lesbar, servus"
+    };
     // Zufallsgenerator
     static std::random_device rd;
     static std::mt19937 rng(rd());
