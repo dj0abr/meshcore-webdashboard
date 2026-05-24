@@ -1063,6 +1063,18 @@ std::optional<MeshCoreClient::RxMessage> MeshCoreClient::decodeRxMessage(const s
             return std::nullopt;
         }
 
+        /*std::cout << "raw Frame:\n";
+        for (size_t i = 0; i < frame.size(); ++i)
+        {
+            std::cout
+                << std::hex
+                << std::setw(2)
+                << std::setfill('0')
+                << static_cast<int>(frame[i])
+                << ' ';
+        }
+        std::cout << std::dec << std::endl;*/
+
         m.isChannel = false;
 
         const uint8_t rawSnr = frame[1];
@@ -1091,6 +1103,7 @@ std::optional<MeshCoreClient::RxMessage> MeshCoreClient::decodeRxMessage(const s
                   << std::dec
                   << "\n";
         */
+        
 
         const size_t pfxOff = 1 + 1 + 2;
 
@@ -1101,6 +1114,7 @@ std::optional<MeshCoreClient::RxMessage> MeshCoreClient::decodeRxMessage(const s
 
         const uint8_t pathMeta = frame[pfxOff + 6];
         m.pathLen = pathMeta & 0x3F;
+        if(m.pathLen == 0x3F) m.pathLen = 0;
 
         uint8_t pathHashSizeCode = (pathMeta >> 6) & 0x03;
         m.pathHashSize = static_cast<uint8_t>(pathHashSizeCode + 1);
@@ -1111,7 +1125,17 @@ std::optional<MeshCoreClient::RxMessage> MeshCoreClient::decodeRxMessage(const s
         const size_t textOff = pfxOff + 6 + 1 + 1 + 4;
         m.text.assign(reinterpret_cast<const char *>(frame.data() + textOff), frame.size() - textOff);
 
-        /*std::cout << "  senderPrefix6    : ";
+        /*std::cout   << "  pathMeta-Debugausgabe    : "
+                    << "frame.size=" << frame.size()
+                    << " pfxOff=" << unsigned(pfxOff)
+                    << " idx=" << unsigned(pfxOff + 6)
+                    << " pathMeta=0x"
+                    << std::hex << unsigned(pathMeta)
+                    << std::dec
+                    << " pathLen=" << unsigned(pathMeta & 0x3F)
+                    << "\n";
+
+        std::cout << "  senderPrefix6    : ";
         for (size_t i = 0; i < 6; ++i)
         {
             std::cout << std::hex
@@ -1202,6 +1226,7 @@ std::optional<MeshCoreClient::RxMessage> MeshCoreClient::decodeRxMessage(const s
 
         const uint8_t pathMeta = frame[off + 1];
         m.pathLen = pathMeta & 0x3F;
+        if(m.pathLen == 0x3F) m.pathLen = 0;
 
         // Optional, falls im Struct vorhanden:
         uint8_t pathHashSizeCode = (pathMeta >> 6) & 0x03;

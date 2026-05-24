@@ -3239,7 +3239,7 @@ bool MeshDB::StoreMeshcoreMonitor(const MonitorRecord& record)
             << "NULL, NULL, NULL, NULL, NULL, "
             << "NULL, NULL, NULL, NULL, NULL, "
             << "NULL, NULL, NULL, NULL, "
-            << "NULL, NULL, NULL";
+            << "NULL, NULL";
     }
     else
     {
