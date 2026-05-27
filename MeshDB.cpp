@@ -1,8 +1,10 @@
 #include "MeshDB.h"
 #include <iostream>
 #include <sstream>
+#include <iomanip>
 #include <cmath>
 #include <cstdlib>
+#include <fstream>
 #include <optional>
 #include <vector>
 #include <ctime>
@@ -38,6 +40,47 @@ namespace
         return (row[idx] != nullptr)
             ? std::strtoull(row[idx], nullptr, 10)
             : 0ULL;
+    }
+
+
+    std::string TrimAsciiWhitespace(const std::string& value)
+    {
+        size_t begin = 0;
+        size_t end = value.size();
+
+        while ((begin < end) &&
+               ((value[begin] == ' ') ||
+                (value[begin] == '\t') ||
+                (value[begin] == '\r') ||
+                (value[begin] == '\n')))
+        {
+            begin++;
+        }
+
+        while ((end > begin) &&
+               ((value[end - 1] == ' ') ||
+                (value[end - 1] == '\t') ||
+                (value[end - 1] == '\r') ||
+                (value[end - 1] == '\n')))
+        {
+            end--;
+        }
+
+        return value.substr(begin, end - begin);
+    }
+
+    bool RemoveUtf8Bom(std::string& value)
+    {
+        if ((value.size() >= 3) &&
+            (static_cast<unsigned char>(value[0]) == 0xEF) &&
+            (static_cast<unsigned char>(value[1]) == 0xBB) &&
+            (static_cast<unsigned char>(value[2]) == 0xBF))
+        {
+            value.erase(0, 3);
+            return true;
+        }
+
+        return false;
     }
 
     uint32_t NextTimeoutEpoch(uint32_t suggestedTimeoutMs)
@@ -666,6 +709,7 @@ bool MeshDB::EnsureSchema()
         "    uptime_secs INT UNSIGNED DEFAULT NULL,"
         "    errors INT UNSIGNED DEFAULT NULL,"
         "    queue_len INT UNSIGNED DEFAULT NULL,"
+        "    rf_rx_bps DOUBLE DEFAULT NULL,"
         "    PRIMARY KEY (id)"
         ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4";
 
@@ -824,6 +868,11 @@ std::string MeshDB::BoolToSql(bool value)
 
 bool MeshDB::UpsertNodeFromAdvert(const DataConnector::AdvertInfo& info)
 {
+    if (IsNodeNameBlacklisted(info.name))
+    {
+        return true;
+    }
+
     const std::string publicKeyHex =
         DataConnector::hexBytes(info.publicKey.data(), info.publicKey.size());
 
@@ -875,6 +924,11 @@ bool MeshDB::UpsertNodeFromAdvert(const DataConnector::AdvertInfo& info)
 
 bool MeshDB::UpsertRepeaterNodeFromAdvert(const DataConnector::AdvertInfo& info)
 {
+    if (IsNodeNameBlacklisted(info.name))
+    {
+        return true;
+    }
+
     const std::string publicKeyHex =
         DataConnector::hexBytes(info.publicKey.data(), info.publicKey.size());
 
@@ -933,6 +987,11 @@ bool MeshDB::UpsertNodeFromPushAdvert(const DataConnector::PushAdvertInfo& info)
         return true;
     }
 
+    if (IsNodeNameBlacklisted(info.name))
+    {
+        return true;
+    }
+
     const std::string prefix6Hex =
         DataConnector::hexBytes(info.prefix6.data(), info.prefix6.size());
 
@@ -952,6 +1011,11 @@ bool MeshDB::UpsertNodeFromPushAdvert(const DataConnector::PushAdvertInfo& info)
 bool MeshDB::UpsertNodeFromPushNewAdvert(const DataConnector::PushNewAdvertInfo& info)
 {
     if (!info.valid)
+    {
+        return true;
+    }
+
+    if (IsNodeNameBlacklisted(info.name))
     {
         return true;
     }
@@ -1009,6 +1073,11 @@ bool MeshDB::UpsertNodeFromPushNewAdvert(const DataConnector::PushNewAdvertInfo&
 bool MeshDB::UpsertRepeaterNodeFromPushNewAdvert(const DataConnector::PushNewAdvertInfo& info)
 {
     if (!info.valid)
+    {
+        return true;
+    }
+
+    if (IsNodeNameBlacklisted(info.name))
     {
         return true;
     }
@@ -1475,6 +1544,58 @@ std::string MeshDB::SanitizeUtf8(const std::string& value)
     return out;
 }
 
+
+bool MeshDB::IsNodeNameBlacklisted(const std::string& nodeName)
+{
+    const std::string cleanNodeName = TrimAsciiWhitespace(SanitizeUtf8(nodeName));
+
+    if (cleanNodeName.empty())
+    {
+        return false;
+    }
+
+    std::ifstream file("blacklist.txt", std::ios::binary);
+
+    if (!file.is_open())
+    {
+        return false;
+    }
+
+    std::string line;
+    bool firstLine = true;
+
+    while (std::getline(file, line))
+    {
+        if (firstLine)
+        {
+            (void)RemoveUtf8Bom(line);
+            firstLine = false;
+        }
+
+        const std::string blacklistName = TrimAsciiWhitespace(SanitizeUtf8(line));
+
+        if (blacklistName.empty())
+        {
+            continue;
+        }
+
+        if (blacklistName[0] == '#')
+        {
+            continue;
+        }
+
+        if (blacklistName == cleanNodeName)
+        {
+            std::cout << "[BLACKLIST] Node \""
+                      << cleanNodeName
+                      << "\" steht in blacklist.txt und wird nicht gespeichert\n";
+            return true;
+        }
+    }
+
+    return false;
+}
+
 std::optional<MeshDB::OutgoingTx> MeshDB::FetchNextQueuedTx()
 {
     std::lock_guard<std::mutex> lock(s_mutex);
@@ -1842,6 +1963,78 @@ bool MeshDB::ClearNodesTable()
     }
 
     return Execute("TRUNCATE TABLE nodes");
+}
+
+
+bool MeshDB::DeleteBlacklistedRepeaterNodes()
+{
+    std::lock_guard<std::mutex> lock(s_mutex);
+
+    if (!s_ready || (s_conn == nullptr))
+    {
+        return false;
+    }
+
+    std::ifstream file("blacklist.txt", std::ios::binary);
+
+    if (!file.is_open())
+    {
+        return true;
+    }
+
+    std::vector<std::string> blacklistNames;
+    std::string line;
+    bool firstLine = true;
+
+    while (std::getline(file, line))
+    {
+        if (firstLine)
+        {
+            (void)RemoveUtf8Bom(line);
+            firstLine = false;
+        }
+
+        const std::string blacklistName = TrimAsciiWhitespace(SanitizeUtf8(line));
+
+        if (blacklistName.empty())
+        {
+            continue;
+        }
+
+        if (blacklistName[0] == '#')
+        {
+            continue;
+        }
+
+        blacklistNames.push_back(blacklistName);
+    }
+
+    unsigned long long deletedTotal = 0ULL;
+
+    for (const std::string& name : blacklistNames)
+    {
+        std::ostringstream del;
+
+        del
+            << "DELETE FROM repeaternodes "
+            << "WHERE name = " << ToSqlString(name);
+
+        if (!Execute(del.str()))
+        {
+            return false;
+        }
+
+        deletedTotal += mysql_affected_rows(s_conn);
+    }
+
+    if (deletedTotal > 0ULL)
+    {
+        std::cout << "[BLACKLIST] "
+                  << deletedTotal
+                  << " Eintrag/Eintraege aus repeaternodes entfernt\n";
+    }
+
+    return true;
 }
 
 bool MeshDB::ClearTxBoxTable()
@@ -3777,55 +3970,61 @@ bool MeshDB::UpdateNodeAdvertPathFromRxLog(const DataConnector::PushRxLogInfo& i
 
     if (info.hasAdvertRole && info.advertRole == 2)
     {
-        const std::string prefix6Hex = info.advertPublicKey.substr(0, 12);
+        const bool hasBlacklistedAdvertName =
+            info.hasAdvertName && IsNodeNameBlacklisted(info.advertName);
 
-        std::ostringstream nodeSql;
-
-        nodeSql
-            << "INSERT INTO repeaternodes ("
-            << "advert_type, advert_flags, name, public_key_hex, prefix6_hex, "
-            << "adv_lat_e6, adv_lon_e6, last_advert_at, first_seen_at, is_local"
-            << ") VALUES ("
-            << unsigned(info.advertRole) << ", "
-            << "0, "
-            << (info.hasAdvertName ? ToSqlString(info.advertName) : "''") << ", "
-            << ToSqlString(info.advertPublicKey) << ", "
-            << ToSqlString(prefix6Hex) << ", ";
-
-        if (info.hasAdvertLatitudeE6)
+        if (!hasBlacklistedAdvertName)
         {
-            nodeSql << info.advertLatitudeE6;
-        }
-        else
-        {
-            nodeSql << "NULL";
-        }
+            const std::string prefix6Hex = info.advertPublicKey.substr(0, 12);
 
-        nodeSql << ", ";
+            std::ostringstream nodeSql;
 
-        if (info.hasAdvertLongitudeE6)
-        {
-            nodeSql << info.advertLongitudeE6;
-        }
-        else
-        {
-            nodeSql << "NULL";
-        }
+            nodeSql
+                << "INSERT INTO repeaternodes ("
+                << "advert_type, advert_flags, name, public_key_hex, prefix6_hex, "
+                << "adv_lat_e6, adv_lon_e6, last_advert_at, first_seen_at, is_local"
+                << ") VALUES ("
+                << unsigned(info.advertRole) << ", "
+                << "0, "
+                << (info.hasAdvertName ? ToSqlString(info.advertName) : "''") << ", "
+                << ToSqlString(info.advertPublicKey) << ", "
+                << ToSqlString(prefix6Hex) << ", ";
 
-        nodeSql
-            << ", " << (info.hasAdvertTimestamp ? ToSqlDateTimeFromU32(info.advertTimestamp) : "NULL")
-            << ", COALESCE("
-            << (info.hasAdvertTimestamp ? ToSqlDateTimeFromU32(info.advertTimestamp) : "NULL")
-            << ", CURRENT_TIMESTAMP), "
-            << "1"
-            << ")"
-            << " ON DUPLICATE KEY UPDATE "
-            << "is_local=1, "
-            << "updated_at=CURRENT_TIMESTAMP";
+            if (info.hasAdvertLatitudeE6)
+            {
+                nodeSql << info.advertLatitudeE6;
+            }
+            else
+            {
+                nodeSql << "NULL";
+            }
 
-        if (!Execute(nodeSql.str()))
-        {
-            return false;
+            nodeSql << ", ";
+
+            if (info.hasAdvertLongitudeE6)
+            {
+                nodeSql << info.advertLongitudeE6;
+            }
+            else
+            {
+                nodeSql << "NULL";
+            }
+
+            nodeSql
+                << ", " << (info.hasAdvertTimestamp ? ToSqlDateTimeFromU32(info.advertTimestamp) : "NULL")
+                << ", COALESCE("
+                << (info.hasAdvertTimestamp ? ToSqlDateTimeFromU32(info.advertTimestamp) : "NULL")
+                << ", CURRENT_TIMESTAMP), "
+                << "1"
+                << ")"
+                << " ON DUPLICATE KEY UPDATE "
+                << "is_local=1, "
+                << "updated_at=CURRENT_TIMESTAMP";
+
+            if (!Execute(nodeSql.str()))
+            {
+                return false;
+            }
         }
     }
 
@@ -3870,6 +4069,32 @@ bool MeshDB::StoreCompanionRadioConnected(bool connected)
         << "'{}'"
         << ") ON DUPLICATE KEY UPDATE "
         << "connected = VALUES(connected), "
+        << "updated_at = CURRENT_TIMESTAMP";
+
+    return Execute(oss.str());
+}
+
+bool MeshDB::StoreCompanionRadioRfRxBps(double rfRxBps)
+{
+    std::lock_guard<std::mutex> lock(s_mutex);
+
+    if (!s_ready || s_conn == nullptr)
+    {
+        return false;
+    }
+
+    std::ostringstream oss;
+
+    oss << std::fixed << std::setprecision(3);
+    oss << "INSERT INTO companion_radio_status ("
+        << "id, connected, json_text, rf_rx_bps"
+        << ") VALUES ("
+        << "1, "
+        << "1, "
+        << "'{}', "
+        << rfRxBps
+        << ") ON DUPLICATE KEY UPDATE "
+        << "rf_rx_bps = VALUES(rf_rx_bps), "
         << "updated_at = CURRENT_TIMESTAMP";
 
     return Execute(oss.str());
@@ -3985,6 +4210,15 @@ bool MeshDB::InsertMissingRepeaterNodesFromSync(
     for (const RepeaterNodeSyncRecord& node : nodes)
     {
         if (node.publicKeyHex.size() != 64)
+        {
+            if (skipped != nullptr)
+            {
+                (*skipped)++;
+            }
+            continue;
+        }
+
+        if (IsNodeNameBlacklisted(node.name))
         {
             if (skipped != nullptr)
             {

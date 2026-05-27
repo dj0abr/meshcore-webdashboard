@@ -13,6 +13,7 @@
 
 static constexpr unsigned DISCOVER_COOLDOWN_SECONDS = 5;
 static constexpr unsigned RADIO_STATUS_POLL_SECONDS = 20;
+static constexpr unsigned RF_RATE_PRINT_SECONDS = 60;
 
 static std::string JsonEscapeLocal(const std::string& value)
 {
@@ -208,6 +209,10 @@ AppRuntime::AppRuntime(MeshCoreClient& client)
     , m_nextRepeaterPruneAt(std::chrono::steady_clock::now())
     , m_resyncNodesAfterRepeaterPrune(false)
     , m_nextHourlyNodesResyncAt(std::chrono::steady_clock::now() + std::chrono::hours(1))
+    , m_rfRateWindowBytes(0)
+    , m_rfRateWindowPackets(0)
+    , m_nextRfRatePrintAt(std::chrono::steady_clock::now() + std::chrono::seconds(RF_RATE_PRINT_SECONDS))
+    , m_rfRateWindowStartedAt(std::chrono::steady_clock::now())
 {
 }
 
@@ -247,6 +252,7 @@ void AppRuntime::StartupSync()
     MeshDB::ClearNodesTable();
     MeshDB::ClearChannelsTable();
     MeshDB::ClearTxBoxTable();
+    MeshDB::DeleteBlacklistedRepeaterNodes();
 
     m_pruneRepeatersAfterSync = true;
 
@@ -270,11 +276,79 @@ void AppRuntime::Tick()
     ProcessRepeaterContactPrune();
     ProcessHourlyNodesResync();
     
+    PrintRfRxRateIfDue();
     PollRadioStatus();
     ProcessCompanionActions();
     ProcessOutgoingQueue();
     ProcessDiscoverQueue();
     ProcessAckTimeouts();
+}
+
+void AppRuntime::ObserveRfRxBytes(size_t byteCount)
+{
+    std::lock_guard<std::mutex> lock(m_rfRateMutex);
+
+    m_rfRateWindowBytes += static_cast<uint64_t>(byteCount);
+    m_rfRateWindowPackets++;
+}
+
+void AppRuntime::PrintRfRxRateIfDue()
+{
+    const auto now = std::chrono::steady_clock::now();
+
+    if (now < m_nextRfRatePrintAt)
+    {
+        return;
+    }
+
+    uint64_t bytes = 0;
+    uint64_t packets = 0;
+    double seconds = 0.0;
+
+    {
+        std::lock_guard<std::mutex> lock(m_rfRateMutex);
+
+        seconds = std::chrono::duration<double>(now - m_rfRateWindowStartedAt).count();
+
+        bytes = m_rfRateWindowBytes;
+        packets = m_rfRateWindowPackets;
+
+        m_rfRateWindowBytes = 0;
+        m_rfRateWindowPackets = 0;
+        m_rfRateWindowStartedAt = now;
+        m_nextRfRatePrintAt = now + std::chrono::seconds(RF_RATE_PRINT_SECONDS);
+    }
+
+    if (seconds <= 0.0)
+    {
+        seconds = static_cast<double>(RF_RATE_PRINT_SECONDS);
+    }
+
+    const double bytesPerSecond = static_cast<double>(bytes) / seconds;
+    const double bitsPerSecond = (static_cast<double>(bytes) * 8.0) / seconds;
+
+    std::cout
+        << "[RF RATE] RX "
+        << packets
+        << " packets, "
+        << bytes
+        << " bytes in "
+        << std::fixed
+        << std::setprecision(1)
+        << seconds
+        << " s => "
+        << std::setprecision(2)
+        << bytesPerSecond
+        << " B/s, "
+        << bitsPerSecond
+        << " bit/s"
+        << std::defaultfloat
+        << std::endl;
+
+    if (!MeshDB::StoreCompanionRadioRfRxBps(bitsPerSecond))
+    {
+        std::cerr << "[RF RATE] database update failed\n";
+    }
 }
 
 void AppRuntime::RequestContactSync()

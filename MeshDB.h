@@ -215,6 +215,7 @@ public:
     static bool StorePushUnknown(const DataConnector::PushUnknownInfo& info, const std::string& summary);
     static bool StoreCompanionRadioStatusJson(const std::string& jsonText);
     static bool StoreCompanionRadioConnected(bool connected);
+    static bool StoreCompanionRadioRfRxBps(double rfRxBps);
 
     static bool StoreCompanionRadioStatus(
         const std::string& jsonText,
@@ -228,6 +229,7 @@ public:
 
     static bool ClearAllTables();
     static bool ClearNodesTable();
+    static bool DeleteBlacklistedRepeaterNodes();
     static bool ClearTxBoxTable();
 
     static bool MarkTxWaitingAck(
@@ -365,6 +367,7 @@ private:
     static std::string ToSqlDateTimeFromU32(uint32_t epoch);
     static std::string BoolToSql(bool value);
     static std::string SanitizeUtf8(const std::string& value);
+    static bool IsNodeNameBlacklisted(const std::string& nodeName);
     static bool MessageAlreadyStoredUnlocked(
             const DataConnector::MessageInfo& info,
             const std::string& prefix6Hex);

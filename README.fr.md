@@ -222,7 +222,19 @@ Example:
 ./meshcore_api tcp://192.168.10.170:5000
 ```
 
+
 ------------------------------------------------------------------------
+
+## Blacklist
+
+Un fichier texte UTF-8 nommé `blacklist.txt` peut être placé dans le répertoire du backend.
+
+Si un nom de nœud correspond à une entrée de ce fichier, le nœud sera ignoré et ne sera pas écrit dans la base de données.
+
+- un nom de nœud par ligne
+- UTF-8 / emoji pris en charge
+- les lignes commençant par `#` sont ignorées
+- les repeaternodes blacklistés sont supprimés de `repeaternodes` au démarrage du backend
 
 ## License
 

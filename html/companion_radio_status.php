@@ -30,7 +30,8 @@ try
             updated_at,
             connected,
             json_text,
-            battery_mv
+            battery_mv,
+            rf_rx_bps
         FROM companion_radio_status
         WHERE id = 1
         LIMIT 1
@@ -67,6 +68,7 @@ try
                 'battery_mv' => $row['battery_mv'] !== null
                     ? (int) $row['battery_mv']
                     : (isset($status['battery_mv']) ? (int) $status['battery_mv'] : null),
+                'rf_rx_bps' => $row['rf_rx_bps'] !== null ? (float) $row['rf_rx_bps'] : null,
                 'last_rssi' => isset($status['last_rssi']) ? (float) $status['last_rssi'] : null,
                 'last_snr' => isset($status['last_snr']) ? (float) $status['last_snr'] : null,
                 'tx_air_secs' => isset($status['tx_air_secs']) ? (int) $status['tx_air_secs'] : null,

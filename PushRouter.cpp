@@ -294,6 +294,11 @@ void PushRouter::HandleLogRxData(const std::vector<uint8_t>& payload)
     const MeshRxLogDecoder::DecodedPacket pkt =
         MeshRxLogDecoder::Decode(payload);
 
+    if (!pkt.rfPacket.empty())
+    {
+        m_runtime.ObserveRfRxBytes(pkt.rfPacket.size());
+    }
+
     MeshcoreMonitor(
         "PUSH RX_LOG",
         MeshCoreProto::PUSH_CODE_RX_LOG_DATA,

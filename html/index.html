@@ -1294,12 +1294,58 @@
             display: flex;
             align-items: center;
             gap: 8px;
-            width: 310px;
+            width: 470px;
             margin-left: auto;
             margin-top: 6px;
             color: var(--muted);
             font-size: 11px;
             line-height: 1;
+        }
+
+        .data-rate-meter
+        {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            min-width: 150px;
+            flex-shrink: 0;
+        }
+
+        .data-rate-track
+        {
+            position: relative;
+            width: 90px;
+            min-width: 90px;
+            height: 7px;
+            border: 1px solid rgba(255, 255, 255, 0.16);
+            border-radius: 999px;
+            background: transparent;
+            overflow: hidden;
+        }
+
+        .data-rate-fill
+        {
+            position: absolute;
+            left: 0;
+            top: 0;
+            height: 100%;
+            width: 0%;
+            border-radius: 999px;
+            background: var(--accent);
+            transition: width 0.25s ease;
+        }
+
+        .data-rate-label,
+        .noise-floor-label
+        {
+            white-space: nowrap;
+        }
+
+        .data-rate-text
+        {
+            min-width: 48px;
+            text-align: left;
+            white-space: nowrap;
         }
 
         .battery-voltage-text
@@ -1342,8 +1388,8 @@
         .noise-floor-track
         {
             position: relative;
-            width: 140px;
-            min-width: 140px;
+            width: 90px;
+            min-width: 90px;
             height: 7px;
             border: 1px solid rgba(255, 255, 255, 0.16);
             border-radius: 999px;
@@ -1385,6 +1431,7 @@
             min-width: 64px;
             text-align: right;
             white-space: nowrap;
+            margin-left: -20px;
         }
 
         .chat-message-header
@@ -1739,10 +1786,18 @@
         </div>
 
         <div id="noiseFloorMeter" class="noise-floor-meter" title="Noise floor" data-i18n-title="radio.noise_floor">
+            <div id="dataRateMeter" class="data-rate-meter" title="RX data rate" data-i18n-title="radio.data_rate">
+                <div class="data-rate-label">RX:</div>
+                <div class="data-rate-track" aria-hidden="true">
+                    <div id="dataRateFill" class="data-rate-fill"></div>
+                </div>
+                <div id="dataRateText" class="data-rate-text">-- bps</div>
+            </div>
+            <div class="noise-floor-label">Noise:</div>
             <div class="noise-floor-track" aria-hidden="true">
                 <div id="noiseFloorFill" class="noise-floor-fill"></div>
             </div>
-            <div id="noiseFloorText" class="noise-floor-text">NF: --</div>
+            <div id="noiseFloorText" class="noise-floor-text">--dBm</div>
             <div id="batteryVoltageText" class="battery-voltage-text">Batt: --</div>
             <div class="companion-link-status" title="Companion connection" data-i18n-title="radio.companion_connection">
                 <span id="companionLinkLed" class="companion-link-led offline"></span>

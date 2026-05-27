@@ -243,6 +243,9 @@ const el =
     noiseFloorMeter: document.getElementById("noiseFloorMeter"),
     noiseFloorFill: document.getElementById("noiseFloorFill"),
     noiseFloorText: document.getElementById("noiseFloorText"),
+    dataRateMeter: document.getElementById("dataRateMeter"),
+    dataRateFill: document.getElementById("dataRateFill"),
+    dataRateText: document.getElementById("dataRateText"),
     batteryVoltageText: document.getElementById("batteryVoltageText"),
     companionLinkLed: document.getElementById("companionLinkLed"),
 };
@@ -452,6 +455,63 @@ function renderBatteryVoltage(batteryMv, updatedAt)
     el.batteryVoltageText.textContent = `${tr("radio.battery_short", "Batt")}: ${voltageText} V`;
     el.batteryVoltageText.title =
         `${tr("radio.battery", "Battery")}: ${voltage.toFixed(3)} V` +
+        (updatedAt ? `\n${tr("common.update", "Update")}: ${updatedAt}` : "");
+}
+
+
+const DATA_RATE_CONFIG =
+{
+    maxBps: 62500
+};
+
+function dataRatePercent(bps)
+{
+    const maxBps = DATA_RATE_CONFIG.maxBps;
+    const clamped = Math.max(0, Math.min(maxBps, bps));
+
+    if (clamped <= 0)
+    {
+        return 0;
+    }
+
+    return (Math.log10(clamped + 1) / Math.log10(maxBps + 1)) * 100.0;
+}
+
+function formatDataRateBps(bps)
+{
+    if (!Number.isFinite(bps))
+    {
+        return "--";
+    }
+
+    return `${Math.round(bps)} bps`;
+}
+
+function renderDataRate(rfRxBps, updatedAt)
+{
+    if (!el.dataRateMeter || !el.dataRateFill || !el.dataRateText)
+    {
+        return;
+    }
+
+    if (!Number.isFinite(rfRxBps))
+    {
+        el.dataRateFill.style.width = "0%";
+        el.dataRateText.textContent = "-- bps";
+        el.dataRateMeter.title = tr("radio.data_rate_no_value", "RX data rate: kein Wert");
+
+        return;
+    }
+
+    const safeBps = Math.max(0, rfRxBps);
+    const percent = dataRatePercent(safeBps);
+    const text = formatDataRateBps(safeBps);
+
+    el.dataRateFill.style.width = `${percent}%`;
+    el.dataRateText.textContent = text;
+    el.dataRateMeter.title =
+        `${tr("radio.data_rate", "RX data rate")}: ${text}` +
+        `\n${tr("radio.data_rate_scale", "Balken: logarithmisch skaliert bis 62500 bps")}` +
         (updatedAt ? `\n${tr("common.update", "Update")}: ${updatedAt}` : "");
 }
 
@@ -1700,7 +1760,7 @@ function renderNoiseFloor(noiseFloor, updatedAt)
         el.noiseFloorMeter.classList.remove("has-value");
         el.noiseFloorFill.style.width = "0%";
         el.noiseFloorFill.className = "noise-floor-fill";
-        el.noiseFloorText.textContent = "noise: --";
+        el.noiseFloorText.textContent = "--dBm";
         el.noiseFloorMeter.title = "Noise floor: kein Wert";
 
         return;
@@ -1716,7 +1776,7 @@ function renderNoiseFloor(noiseFloor, updatedAt)
     el.noiseFloorFill.className = `noise-floor-fill ${stateLabel}`;
     el.noiseFloorFill.style.width = `${percent}%`;
 
-    el.noiseFloorText.textContent = `noise: ${roundedNoiseFloor}dBm`;
+    el.noiseFloorText.textContent = `${roundedNoiseFloor}dBm`;
     el.noiseFloorMeter.title =
         `Noise floor: ${noiseFloor.toFixed(1)} dBm` +
         (updatedAt ? `\nUpdate: ${updatedAt}` : "");
@@ -1731,7 +1791,9 @@ async function refreshNoiseFloor()
 
         const noiseFloor = status && status.noise_floor !== null ? Number(status.noise_floor) : NaN;
         const batteryMv = status && status.battery_mv !== null ? Number(status.battery_mv) : NaN;
+        const rfRxBps = status && status.rf_rx_bps !== null ? Number(status.rf_rx_bps) : NaN;
 
+        renderDataRate(rfRxBps, status ? status.updated_at : null);
         renderNoiseFloor(noiseFloor, status ? status.updated_at : null);
         renderBatteryVoltage(batteryMv, status ? status.updated_at : null);
         renderCompanionLinkStatus(status ? !!status.connected : false, status ? status.updated_at : null);
@@ -1739,6 +1801,7 @@ async function refreshNoiseFloor()
     catch (err)
     {
         console.error("Noise floor refresh failed:", err);
+        renderDataRate(NaN, null);
         renderNoiseFloor(NaN, null);
         renderBatteryVoltage(NaN, null);
         renderCompanionLinkStatus(false, null);

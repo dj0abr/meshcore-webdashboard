@@ -221,7 +221,19 @@ Example:
 ```bash
 ./meshcore_api tcp://192.168.10.170:5000
 ```
+
 ------------------------------------------------------------------------
+
+## Blacklist
+
+A UTF-8 text file named `blacklist.txt` can be placed in the backend directory.
+
+If a node name matches an entry in this file, the node will be ignored and not written to the database.
+
+- one node name per line
+- UTF-8 / emoji supported
+- lines starting with `#` are ignored
+- blacklisted repeater nodes are removed from `repeaternodes` on backend startup
 
 ## License
 

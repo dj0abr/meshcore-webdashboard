@@ -7,6 +7,7 @@
 #include <chrono>
 #include <vector>
 #include <cstdint>
+#include <cstddef>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -47,6 +48,8 @@ public:
     void ProcessCompanionActions();
     bool ProcessSingleCompanionAction(const MeshDB::CompanionAction& action);
     void PollRadioStatus();
+
+    void ObserveRfRxBytes(size_t byteCount);
 
 private:
     bool ShouldRunContactSync();
@@ -114,5 +117,12 @@ private:
 
     void RebuildNodesFromCompanion(bool pruneRepeaters);
     void ProcessHourlyNodesResync();
+    void PrintRfRxRateIfDue();
     std::chrono::steady_clock::time_point m_nextHourlyNodesResyncAt;
+
+    std::mutex m_rfRateMutex;
+    uint64_t m_rfRateWindowBytes;
+    uint64_t m_rfRateWindowPackets;
+    std::chrono::steady_clock::time_point m_nextRfRatePrintAt;
+    std::chrono::steady_clock::time_point m_rfRateWindowStartedAt;
 };
