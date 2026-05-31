@@ -15,6 +15,7 @@ Web dashboard for **MeshCore nodes** with a focus on desktop systems.
 -   runs on **Linux** (Raspberry Pi, PC, etc.)
 -   **no smartphone required**
 -   optimized for **desktop monitors**
+-   and additionally for **mobile devices**
 -   accessible with **any modern browser** on the local network
 
 ------------------------------------------------------------------------
@@ -25,6 +26,7 @@ Among other things, the dashboard offers:
 
 -   display of **nodes and rooms**
 -   **chat messages**
+-   **any number of nodes (no limit!)**
 -   **channel management**
 -   **repeater discovery**
 -   **map view** of nodes
@@ -63,48 +65,10 @@ git clone https://github.com/USER/meshcore-webdashboard.git
 cd meshcore-webdashboard
 ```
 
-Install the packages:
+Install the software:
 
 ``` bash
 sudo ./install.sh
-```
-
-------------------------------------------------------------------------
-
-# Prepare the database
-
-Start MariaDB:
-
-``` bash
-sudo mariadb
-```
-
-Insert the following SQL block:
-
-``` sql
-DROP USER IF EXISTS 'meshcore'@'localhost';
-CREATE DATABASE IF NOT EXISTS meshcore
-CHARACTER SET utf8mb4
-COLLATE utf8mb4_general_ci;
-CREATE USER 'meshcore'@'localhost';
-GRANT ALL PRIVILEGES ON meshcore.* TO 'meshcore'@'localhost';
-FLUSH PRIVILEGES;
-```
-
-------------------------------------------------------------------------
-
-# Build the software
-
-Compile everything:
-
-``` bash
-make
-```
-
-Install the HTML files:
-
-``` bash
-sudo cp -R html/* /var/www/html
 ```
 
 ------------------------------------------------------------------------

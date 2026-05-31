@@ -15,6 +15,7 @@ Tableau de bord web pour les **nœuds MeshCore**, conçu en priorité pour les s
 -   fonctionne sous **Linux** (Raspberry Pi, PC, etc.)
 -   **aucun smartphone nécessaire**
 -   optimisé pour les **écrans de bureau**
+-   et également pour les **appareils mobiles**
 -   accessible avec **n'importe quel navigateur moderne** sur le réseau local
 
 ------------------------------------------------------------------------
@@ -25,6 +26,7 @@ Le tableau de bord propose notamment :
 
 -   affichage des **nœuds et des rooms**
 -   **messages de chat**
+-   **nombre illimité de nœuds (aucune limite !)**
 -   **gestion des canaux**
 -   **découverte des répéteurs**
 -   **vue cartographique** des nœuds
@@ -63,48 +65,10 @@ git clone https://github.com/USER/meshcore-webdashboard.git
 cd meshcore-webdashboard
 ```
 
-Installer les paquets :
+Installer les software :
 
 ``` bash
 sudo ./install.sh
-```
-
-------------------------------------------------------------------------
-
-# Préparer la base de données
-
-Démarrer MariaDB :
-
-``` bash
-sudo mariadb
-```
-
-Insérer le bloc SQL suivant :
-
-``` sql
-DROP USER IF EXISTS 'meshcore'@'localhost';
-CREATE DATABASE IF NOT EXISTS meshcore
-CHARACTER SET utf8mb4
-COLLATE utf8mb4_general_ci;
-CREATE USER 'meshcore'@'localhost';
-GRANT ALL PRIVILEGES ON meshcore.* TO 'meshcore'@'localhost';
-FLUSH PRIVILEGES;
-```
-
-------------------------------------------------------------------------
-
-# Compiler le logiciel
-
-Compiler l'ensemble :
-
-``` bash
-make
-```
-
-Installer les fichiers HTML :
-
-``` bash
-sudo cp -R html/* /var/www/html
 ```
 
 ------------------------------------------------------------------------
