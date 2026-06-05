@@ -9,7 +9,6 @@
 #include <algorithm>
 #include <cctype>
 #include <array>
-#include <random>
 
 namespace
 {
@@ -172,21 +171,17 @@ static std::string ExtractSenderName(const std::string& text)
 
 void MessageRouter::HandleTestChannelMessage(const MeshCoreClient::RxMessage& msg)
 {
-    if (!MeshDB::IsCompanionBotEnabled())
-    {
-        return;
-    }
+    if (!MeshDB::IsCompanionBotEnabled()) return;
 
     std::cout << "[#test] " << msg.text << "\n";
 
-    if (!IsTestCommand(msg.text))
-    {
-        return;
-    }
+    if (!IsTestCommand(msg.text)) return;
+
+    // beantworte Ping nur für 2 oder 3 Byte Hashes
+    if (msg.pathHashSize != 2 && msg.pathHashSize != 3) return;
 
     // keine Ping Flood zulassen
     static std::time_t lastReply = 0;
-
     const std::time_t now = std::time(nullptr);
 
     if ((now - lastReply) < 10)
@@ -199,60 +194,111 @@ void MessageRouter::HandleTestChannelMessage(const MeshCoreClient::RxMessage& ms
 
     const std::string senderName = ExtractSenderName(msg.text);
     const std::string locName    = MeshDB::GetCompanionLocationName();
+    const std::string hashBytes  = std::to_string(static_cast<unsigned>(msg.pathHashSize));
 
-    static const std::array<std::string, 40> replies =
+    static const std::array<std::string, 16> prefixes =
     {
-        "du bist gehört in {loc} mit {hops} hops",
-        "Hallo {sendername}, klappt bis {loc} mit {hops} hops",
-        "{sendername}, kommst hier in {loc} gut an",
-        "hier in {loc} alles lesbar",
-        "Signal in {loc} sauber angekommen",
-        "kommt gut rüber nach {loc}",
-        "{sendername}, in {loc} noch gut verständlich",
-        "läuft bis {loc} stabil",
-        "hier in {loc} problemlos empfangen",
-        "empfang in {loc} bestätigt",
-        "kommt hier in {loc} noch ordentlich an, {sendername}",
-        "alles gut bis {loc}",
-        "hier aus {loc}, passt",
-        "sauber durch bis {loc}",
-        "in {loc} gut angekommen mit {hops} hops",
-        "{sendername}, lese dich hier in {loc}",
-        "bis {loc} noch voll ok, hast {hops} hops",
-        "hier in {loc} ohne probleme empfangen",
-        "signal kam hier in {loc} an",
-        "{sendername}, in {loc} alles gut lesbar, hat {hops} x gehoppt",
-
-        "servus aus {loc}, dein signal passt",
-        "{sendername}, hier in {loc} sauber empfangen",
-        "dein paketl is bis {loc} kemma",
-        "läuft guad bis {loc}",
-        "hier in {loc} no richtig guad lesbar",
-        "{sendername}, kommt in {loc} astrein an",
-        "sauberer empfang hier in {loc}",
-        "dein signal hat {hops} hops bis {loc} gebraucht",
-        "hier aus {loc}, alles im grünen bereich",
-        "{sendername}, bist in {loc} no deutlich zu hören",
-        "kommt hier in {loc} guad owe",
-        "signal hier in {loc} ohne aussetzer",
-        "{sendername}, hier in {loc} vui guad verständlich",
-        "läuft sauber ein nach {loc}",
-        "dein signal is in {loc} angekommen",
-        "{sendername}, hier in {loc} passt ois",
-        "bis {loc} noch stabil mit {hops} hops",
-        "hier in {loc}, Empfang top",
-        "kommt locker bis {loc} rüber",
-        "{sendername}, hier in {loc} sauber lesbar, servus"
+        " 👍{hash}👍Byte Hash: ",
+        " 👍{hash}B👍 Hash sagt: ",
+        " [{hash} Byte Hash] ",
+        " Hash {hash}B: ",
+        " via {hash} Byte Hash: ",
+        " {hash}B Hash empfangen: ",
+        " über {hash} Byte Hash: ",
+        " mit {hash}B Hash: ",
+        " {hash}-Byte-Hash sagt: ",
+        " 👍{hash} Byte Hash👍 ",
+        " Hashgröße {hash} Byte: ",
+        " per {hash}B Hash: ",
+        " {hash} Byte Route: ",
+        " Route mit {hash}B Hash: ",
+        " Mesh {hash}B Hash: ",
+        " Testkanal {hash}B: "
     };
-    // Zufallsgenerator
-    static std::random_device rd;
-    static std::mt19937 rng(rd());
 
-    std::uniform_int_distribution<std::size_t> dist(0, replies.size() - 1);
+    static const std::array<std::string, 70> replies =
+    {
+        "{name}, du bist gehört in {loc} mit {hops} hops",
+        "Hallo {name}, klappt bis {loc} mit {hops} hops",
+        "{name}, kommst hier in {loc} gut an über {hops} hops",
+        "hier in {loc} alles lesbar mit {hops} hops, {name}",
+        "Signal in {loc} sauber angekommen über {hops} hops, {name}",
+        "{name}, kommt gut rüber nach {loc} mit {hops} hops",
+        "in {loc} noch gut verständlich über {hops} hops, {name}",
+        "{name}, läuft bis {loc} stabil mit {hops} hops",
+        "hier in {loc} problemlos empfangen über {hops} hops, {name}",
+        "empfang in {loc} bestätigt, {name}, {hops} hops",
+        "{name}, kommt hier in {loc} noch ordentlich an mit {hops} hops",
+        "alles gut bis {loc} über {hops} hops, {name}",
+        "hier aus {loc}, passt mit {hops} hops, {name}",
+        "{name}, sauber durch bis {loc} mit {hops} hops",
+        "in {loc} gut angekommen mit {hops} hops, {name}",
+        "lese dich hier in {loc} über {hops} hops, {name}",
+        "bis {loc} noch voll ok, hast {hops} hops, {name}",
+        "hier in {loc} ohne probleme empfangen",
+        "signal kam hier in {loc} an mit {hops} hops, {name}",
+        "in {loc} alles gut lesbar, hat {hops} x gehoppt, {name}",
+        "servus {name} aus {loc}, dein signal passt mit {hops} hops",
+        "hier in {loc} sauber empfangen über {hops} hops, {name}",
+        "dein paketl is bis {loc} kemma, {name}, mit {hops} hops",
+        "läuft guad bis {loc} über {hops} hops, {name}",
+        "hier in {loc} no richtig guad lesbar mit {hops} hops, {name}",
+        "{name}, kommt in {loc} astrein an über {hops} hops",
+        "sauberer empfang hier in {loc} mit {hops} hops, {name}",
+        "dein signal hat {hops} hops bis {loc} gebraucht, {name}",
+        "hier aus {loc}, alles im grünen bereich",
+        "bist in {loc} no deutlich zu hören mit {hops} hops, {name}",
+        "kommt hier in {loc} guad owe über {hops} hops, {name}",
+        "signal hier in {loc} ohne aussetzer mit {hops} hops, {name}",
+        "hier in {loc} vui guad verständlich über {hops} hops, {name}",
+        "{name}, läuft sauber ein nach {loc} mit {hops} hops",
+        "dein signal is in {loc} angekommen über {hops} hops, {name}",
+        "hier in {loc} passt ois mit {hops} hops, {name}",
+        "bis {loc} noch stabil mit {hops} hops, {name}",
+        "hier in {loc}, Empfang top über {hops} hops, {name}",
+        "{name}, kommt locker bis {loc} rüber mit {hops} hops",
+        "hier in {loc} noch gut zu dekodieren über {hops} hops, {name}",
+        "dein signal kommt bis {loc} sauber durch mit {hops} hops, {name}",
+        "aus {loc} alles bestens empfangen über {hops} hops, {name}",
+        "hier in {loc} klar und deutlich mit {hops} hops, {name}",
+        "bis {loc} ohne probleme angekommen über {hops} hops, {name}",
+        "dein paket ist hier in {loc} lesbar mit {hops} hops, {name}",
+        "empfang aus {loc} bestätigt, servus {name}",
+        "hier in {loc} noch volle kopie mit {hops} hops, {name}",
+        "{name}, kommt in {loc} sauber an mit {hops} hops",
+        "signalweg bis {loc} erfolgreich über {hops} hops, {name}",
+        "hier in {loc} alles verständlich angekommen mit {hops} hops, {name}",
+        "dein signal hat {loc} erreicht über {hops} hops, {name}",
+        "aus {loc} kann ich dich gut lesen mit {hops} hops, {name}",
+        "hier in {loc} problemlos dekodiert über {hops} hops, {name}",
+        "{name}, kommt bis {loc} noch ordentlich an mit {hops} hops",
+        "signal in {loc} einwandfrei empfangen über {hops} hops, {name}",
+        "hier in {loc} alles im lot mit {hops} hops, {name}",
+        "dein paket kam nach {loc} mit {hops} hops, {name}",
+        "lesbarkeit in {loc} gegeben über {hops} hops, {name}",
+        "hier in {loc} sauber aufgenommen mit {hops} hops, {name}",
+        "ankunft in {loc} bestätigt über {hops} hops, {name}",
+        "dein signal is bis {loc} durchkemma mit {hops} hops, {name}",
+        "hier in {loc} no glasklar lesbar über {hops} hops, {name}",
+        "kommt bis {loc} ohne verluste an mit {hops} hops, {name}",
+        "hier in {loc} alles bestens, {hops} hops, {name}",
+        "signal aus der runde hier in {loc} angekommen",
+        "dein paket hat {loc} erfolgreich erreicht mit {hops} hops, {name}",
+        "hier in {loc} guter empfang trotz {hops} hops, {name}",
+        "kommt in {loc} noch sauber lesbar an über {hops} hops, {name}",
+        "servus {name} aus {loc}, signal passt einwandfrei mit {hops} hops",
+        "hier in {loc} sauber lesbar, servus {name} über {hops} hops"
+    };
 
-    std::string reply = replies[dist(rng)];
+    static std::size_t prefixIndex = 0;
+    static std::size_t replyIndex  = 0;
 
-    // Platzhalter ersetzen
+    std::string prefix = prefixes[prefixIndex];
+    std::string reply  = replies[replyIndex];
+
+    if (++prefixIndex >= prefixes.size()) prefixIndex = 0;
+    if (++replyIndex >= replies.size()) replyIndex = 0;
+
     auto ReplaceAll =
     [](std::string& str, const std::string& from, const std::string& to)
     {
@@ -265,17 +311,12 @@ void MessageRouter::HandleTestChannelMessage(const MeshCoreClient::RxMessage& ms
         }
     };
 
-    ReplaceAll(reply, "{loc}",  locName);
+    ReplaceAll(prefix, "{hash}", hashBytes);
+    ReplaceAll(reply, "{name}", senderName);
+    ReplaceAll(reply, "{loc}", locName);
     ReplaceAll(reply, "{hops}", std::to_string(static_cast<unsigned>(msg.pathLen)));
 
-    if (!senderName.empty())
-    {
-        ReplaceAll(reply, "{sendername}", senderName);
-    }
-    else
-    {
-        ReplaceAll(reply, "{sendername}", " ");
-    }
+    reply = prefix + reply;
 
     if (!MeshDB::EnqueueChannelTxFromBot(msg.channelIdx, reply))
     {
