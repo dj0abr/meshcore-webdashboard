@@ -75,7 +75,7 @@ try
             SELECT 1
             FROM repeaternodes r0
             WHERE r0.public_key_hex IS NOT NULL
-            AND LOWER(r0.public_key_hex) = LOWER(n0.public_key_hex)
+            AND r0.public_key_hex = n0.public_key_hex
         )
         UNION ALL
         SELECT
@@ -125,7 +125,7 @@ try
             MAX(cm.timestamp_epoch) AS newest_msg_epoch
         FROM (" . $nodeUnionSql . ") n
         LEFT JOIN node_advert_paths p
-            ON LOWER(p.public_key_hex) = LOWER(n.public_key_hex)
+            ON p.public_key_hex = n.public_key_hex
         LEFT JOIN chat_messages cm
             ON cm.name = n.name
         AND (

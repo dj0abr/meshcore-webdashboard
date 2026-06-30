@@ -5736,19 +5736,32 @@ async function openSetupDialog()
     }
 }
 
+let nodesTableRefreshRunning = false;
+
 async function refreshNodesTableKeepScroll()
 {
+    if (nodesTableRefreshRunning) return;
+
+    nodesTableRefreshRunning = true;
+
     const holder = table.rowManager && table.rowManager.element
         ? table.rowManager.element
         : null;
 
     const scrollTop = holder ? holder.scrollTop : 0;
 
-    await table.replaceData();
-
-    if (holder)
+    try
     {
-        holder.scrollTop = scrollTop;
+        await table.replaceData();
+    }
+    catch (err)
+    {
+        console.error("Nodes refresh failed:", err);
+    }
+    finally
+    {
+        if (holder) holder.scrollTop = scrollTop;
+        nodesTableRefreshRunning = false;
     }
 }
 
@@ -6482,7 +6495,7 @@ state.noiseFloorRefreshTimer = setInterval(function()
 setInterval(function()
 {
     refreshNodesTableKeepScroll();
-}, 5000);
+}, 10000);
 
 setInterval(async function()
 {
