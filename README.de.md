@@ -61,7 +61,7 @@ Das Dashboard bietet unter anderem:
 Repository klonen:
 
 ``` bash
-git clone https://github.com/USER/meshcore-webdashboard.git
+git clone https://github.com/dj0abr/meshcore-webdashboard.git
 cd meshcore-webdashboard
 ```
 
