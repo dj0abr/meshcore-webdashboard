@@ -81,11 +81,13 @@
         return await fetchJson("discover_clear.php", postEmpty());
     }
 
-    async function startProtectedRepeaterRequest()
+    async function startProtectedRepeaterRequest(targetName, password)
     {
         return await fetchJson("protected_repeater_request.php", postJson(
         {
-            command: "start"
+            command: "start",
+            target_name: targetName || "",
+            auth_password: password || ""
         }));
     }
 

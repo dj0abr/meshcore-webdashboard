@@ -153,6 +153,23 @@ El proceso puede **ejecutarse varias veces**.
 
 ------------------------------------------------------------------------
 
+## Consulta del repetidor principal
+
+Además de Repeater Discovery, se puede consultar directamente un **repetidor principal (Home Repeater)**.
+
+- introduce el nombre del Home Repeater y, opcionalmente, la contraseña de administrador
+- el inicio de sesión y cada página de la consulta se reintentan automáticamente si falla la transmisión por radio
+- la lista completa de vecinos se carga página por página, no solo el primer subconjunto
+- los repetidores se comparan con `repeaternodes` mediante los primeros **8 caracteres de la clave pública**
+- se añaden las coordenadas disponibles y se calcula la distancia al Home Repeater
+- las posiciones claramente no plausibles a más de **400 km** se ignoran para la visualización
+- la tabla de resultados se puede ordenar por `#`, pubkey, nombre, "oído hace", SNR y distancia, y se puede copiar al portapapeles
+- los repetidores con coordenadas válidas también se pueden mostrar en un **mapa OpenStreetMap** con líneas de conexión al Home Repeater
+
+La contraseña se utiliza únicamente para la consulta actual y no se almacena de forma permanente como contraseña del repetidor.
+
+------------------------------------------------------------------------
+
 ## Conexión TCP (MeshCore Companion)
 
 Además de la conexión USB clásica, el backend también puede comunicarse con un MeshCore Companion a través de TCP.

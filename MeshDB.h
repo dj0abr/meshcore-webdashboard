@@ -85,6 +85,24 @@ public:
         uint32_t lastSeenEpoch = 0;
     };    
 
+    struct RepeaterContactRecord
+    {
+        uint8_t advertType = 0;
+        uint8_t contactFlags = 0;
+        std::string name;
+        std::string publicKeyHex;
+        uint32_t lastAdvertEpoch = 0;
+        int32_t advLatE6 = 0;
+        int32_t advLonE6 = 0;
+    };
+
+    struct RepeaterCoordinateRecord
+    {
+        std::string pubkeyPrefix8;
+        std::optional<int32_t> advLatE6;
+        std::optional<int32_t> advLonE6;
+    };
+
     struct RepeaterNodeSyncRecord
     {
         bool hasNodeId = false;
@@ -170,6 +188,7 @@ public:
         std::string actionType;
         std::string publicKeyHex;
         std::string targetName;
+        std::string authPassword;
         std::string resultJson;
     };
 
@@ -296,6 +315,9 @@ public:
     static std::optional<CompanionConfig> LoadCompanionConfig();
     static std::string GetCompanionLocationName();
     static std::string GetProtectedRepeaterName();
+    static std::optional<RepeaterContactRecord> FindRepeaterContactByName(const std::string& name);
+    static std::vector<RepeaterCoordinateRecord> FindRepeaterCoordinatesByPubkeyPrefixes(
+        const std::vector<std::string>& pubkeyPrefixes8);
     static bool IsCompanionBotEnabled();
     static bool MarkCompanionConfigApplied();
     static bool MarkCompanionConfigApplyFailed(const std::string& error);

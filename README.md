@@ -153,6 +153,23 @@ The process can be **run multiple times**.
 
 ------------------------------------------------------------------------
 
+## Home Repeater Query
+
+In addition to Repeater Discovery, a **Home Repeater** can be queried directly.
+
+- enter the Home Repeater name and an optional admin password
+- login attempts and individual query pages are retried automatically if RF transmission fails
+- the complete neighbour list is loaded page by page instead of returning only the first subset
+- repeaters are matched against `repeaternodes` using the first **8 characters of the public key**
+- available coordinates are added and the distance from the Home Repeater is calculated
+- obviously implausible positions more than **400 km** away are ignored for display
+- the result table can be sorted by `#`, pubkey, name, "heard ago", SNR and distance and can be copied to the clipboard
+- repeaters with valid coordinates can also be displayed on an **OpenStreetMap map** with connection lines to the Home Repeater
+
+The password is used only for the current query and is not stored permanently as a repeater password.
+
+------------------------------------------------------------------------
+
 ## TCP Connection (MeshCore Companion)
 
 In addition to the USB connection, the backend can also connect to a MeshCore Companion via TCP.

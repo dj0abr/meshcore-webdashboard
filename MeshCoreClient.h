@@ -8,6 +8,7 @@
 #include <functional>
 #include <mutex>
 #include <optional>
+#include <set>
 #include <string>
 #include <thread>
 #include <vector>
@@ -141,9 +142,11 @@ public:
 
     // Contacts
     std::optional<std::vector<Peer>> listPeers(std::optional<uint32_t> since = std::nullopt);
+    bool addOrUpdateContact(const Peer& peer);
 
     bool resetPath(const std::array<uint8_t, 32>& publicKey);
     std::optional<std::string> requestNeighboursRaw(const std::string& repeaterName);
+    std::optional<std::string> requestNeighboursRaw(const Peer& repeater, const std::string& password = {});
     bool removeContact(const std::array<uint8_t, 32>& publicKey);
     bool setPathHashMode(uint8_t mode);
 
@@ -226,6 +229,7 @@ private:
 
     // Threads
     std::thread m_taskThread;
+    std::thread m_pushDispatchThread;
 
     // Serialize request/response API calls (MeshCoreLink supports one outstanding request)
     mutable std::mutex m_apiMutex;
@@ -234,6 +238,12 @@ private:
     mutable std::mutex m_cbMutex;
     PushCallback m_pushCb;
     MessageCallback m_msgCb;
+
+    // User push callbacks may perform DB work. Keep them off the link RX thread so
+    // protocol responses cannot be delayed by MariaDB or other application work.
+    std::mutex m_pushDispatchMutex;
+    std::condition_variable m_pushDispatchCv;
+    std::deque<std::pair<uint8_t, std::vector<uint8_t>>> m_pushDispatchQueue;
 
     // Cached self identity
     std::optional<std::array<uint8_t, 32>> m_selfPublicKey;
@@ -264,6 +274,7 @@ private:
 
     // Threads
     void taskLoop();
+    void pushDispatchLoop();
 
     // Message queue
     void triggerMsgSync();
@@ -273,8 +284,34 @@ private:
 
     // Internal push handler from MeshCoreLink
     void onLinkFrame(uint8_t code, const std::vector<uint8_t> &payload);
+    bool loginToPeerSync(const Peer& peer, const std::string& password);
 
     static uint32_t nowUtcEpoch();
+
+    struct LoginCapture
+    {
+        bool active = false;
+        bool ready = false;
+        std::array<uint8_t, 6> prefix {};
+        std::vector<uint8_t> frame;
+    };
+
+    std::mutex m_loginMutex;
+    std::condition_variable m_loginCv;
+    LoginCapture m_loginCapture;
+
+    std::mutex m_authMutex;
+    std::set<std::array<uint8_t, 6>> m_authenticatedPeers;
+
+    struct BinaryCapture
+    {
+        bool active = false;
+        std::deque<std::vector<uint8_t>> frames;
+    };
+
+    std::mutex m_binaryMutex;
+    std::condition_variable m_binaryCv;
+    BinaryCapture m_binaryCapture;
 
         struct DiscoverCapture
     {

@@ -153,6 +153,23 @@ L'opération peut être **répétée plusieurs fois**.
 
 ------------------------------------------------------------------------
 
+## Interrogation du répéteur principal
+
+En plus de Repeater Discovery, un **Home Repeater** peut être interrogé directement.
+
+- saisir le nom du Home Repeater et éventuellement le mot de passe administrateur
+- la connexion et chaque page de la requête sont automatiquement réessayées en cas d'échec radio
+- la liste complète des voisins est chargée page par page au lieu de ne retourner que le premier sous-ensemble
+- les répéteurs sont associés à `repeaternodes` à l'aide des **8 premiers caractères de la clé publique**
+- les coordonnées disponibles sont ajoutées et la distance depuis le Home Repeater est calculée
+- les positions manifestement non plausibles situées à plus de **400 km** sont ignorées pour l'affichage
+- le tableau des résultats peut être trié par `#`, pubkey, nom, "entendu il y a", SNR et distance, puis copié dans le presse-papiers
+- les répéteurs disposant de coordonnées valides peuvent également être affichés sur une **carte OpenStreetMap** avec des lignes de connexion vers le Home Repeater
+
+Le mot de passe n'est utilisé que pour la requête en cours et n'est pas enregistré de façon permanente comme mot de passe du répéteur.
+
+------------------------------------------------------------------------
+
 ## Connexion TCP (MeshCore Companion)
 
 En plus de la connexion USB classique, le backend peut également se connecter à un MeshCore Companion via TCP.

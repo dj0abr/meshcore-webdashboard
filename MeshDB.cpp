@@ -8,6 +8,8 @@
 #include <optional>
 #include <vector>
 #include <ctime>
+#include <algorithm>
+#include <cctype>
 
 MYSQL* MeshDB::s_conn = nullptr;
 MeshDB::Config MeshDB::s_config {};
@@ -691,6 +693,7 @@ bool MeshDB::EnsureSchema()
         "    action_type VARCHAR(32) NOT NULL,"
         "    public_key_hex CHAR(64) DEFAULT NULL,"
         "    target_name VARCHAR(64) DEFAULT NULL,"
+        "    auth_password VARCHAR(64) DEFAULT NULL,"
         "    status TINYINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '0=queued,1=running,2=failed,3=done',"
         "    error_text VARCHAR(255) DEFAULT NULL,"
         "    result_json JSON DEFAULT NULL,"
@@ -699,6 +702,9 @@ bool MeshDB::EnsureSchema()
         "    KEY idx_companion_actions_action_type (action_type),"
         "    KEY idx_companion_actions_public_key_hex (public_key_hex)"
         ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4";
+    const char* sqlCompanionActionsAuthPassword =
+        "ALTER TABLE companion_actions "
+        "ADD COLUMN IF NOT EXISTS auth_password VARCHAR(64) DEFAULT NULL AFTER target_name";
     const char* sqlCompanionRadioStatus =
         "CREATE TABLE IF NOT EXISTS companion_radio_status ("
         "    id TINYINT UNSIGNED NOT NULL,"
@@ -784,6 +790,7 @@ bool MeshDB::EnsureSchema()
         && Execute(sqlMeshcoreMonitor)
         && Execute(sqlDiscoverJobs)
         && Execute(sqlCompanionActions)
+        && Execute(sqlCompanionActionsAuthPassword)
         && Execute(sqlDiscoverResults);
 }
 
@@ -1549,9 +1556,10 @@ bool MeshDB::IsNodeNameBlacklisted(const std::string& nodeName)
 {
     const std::string cleanNodeName = TrimAsciiWhitespace(SanitizeUtf8(nodeName));
 
-    if (cleanNodeName.empty())
+    if (cleanNodeName.empty() || cleanNodeName == "-")
     {
-        return false;
+        std::cout << "[BLACKLIST] Node ohne gueltigen Namen wird nicht gespeichert\n";
+        return true;
     }
 
     std::ifstream file("blacklist.txt", std::ios::binary);
@@ -1975,10 +1983,26 @@ bool MeshDB::DeleteBlacklistedRepeaterNodes()
         return false;
     }
 
+    if (!Execute(
+        "DELETE FROM repeaternodes "
+        "WHERE TRIM(name) = '' OR TRIM(name) = '-'"))
+    {
+        return false;
+    }
+
+    unsigned long long deletedTotal = mysql_affected_rows(s_conn);
+
     std::ifstream file("blacklist.txt", std::ios::binary);
 
     if (!file.is_open())
     {
+        if (deletedTotal > 0ULL)
+        {
+            std::cout << "[BLACKLIST] "
+                      << deletedTotal
+                      << " Eintrag/Eintraege aus repeaternodes entfernt\n";
+        }
+
         return true;
     }
 
@@ -2009,15 +2033,13 @@ bool MeshDB::DeleteBlacklistedRepeaterNodes()
         blacklistNames.push_back(blacklistName);
     }
 
-    unsigned long long deletedTotal = 0ULL;
-
     for (const std::string& name : blacklistNames)
     {
         std::ostringstream del;
 
         del
             << "DELETE FROM repeaternodes "
-            << "WHERE name = " << ToSqlString(name);
+            << "WHERE TRIM(name) = " << ToSqlString(name);
 
         if (!Execute(del.str()))
         {
@@ -2774,6 +2796,175 @@ bool MeshDB::MarkCompanionConfigApplyFailed(const std::string& error)
         << "WHERE id = 1";
 
     return Execute(sql.str());
+}
+
+
+std::optional<MeshDB::RepeaterContactRecord> MeshDB::FindRepeaterContactByName(const std::string& name)
+{
+    std::lock_guard<std::mutex> lock(s_mutex);
+
+    if (!s_ready || s_conn == nullptr || name.empty()) return std::nullopt;
+
+    const std::string sql =
+        "SELECT "
+        "advert_type, "
+        "name, "
+        "public_key_hex, "
+        "UNIX_TIMESTAMP(last_advert_at), "
+        "adv_lat_e6, "
+        "adv_lon_e6 "
+        "FROM repeaternodes "
+        "WHERE name = " + ToSqlString(name) + " "
+        "   OR name_key = " + ToSqlString(name) + " "
+        "ORDER BY updated_at DESC "
+        "LIMIT 1";
+
+    if (mysql_query(s_conn, sql.c_str()) != 0)
+    {
+        std::cerr << "MeshDB SQL error: " << mysql_error(s_conn) << "\n";
+        return std::nullopt;
+    }
+
+    MYSQL_RES* result = mysql_store_result(s_conn);
+
+    if (result == nullptr)
+    {
+        std::cerr << "MeshDB SQL store result error: " << mysql_error(s_conn) << "\n";
+        return std::nullopt;
+    }
+
+    MYSQL_ROW row = mysql_fetch_row(result);
+
+    if (row == nullptr)
+    {
+        mysql_free_result(result);
+        return std::nullopt;
+    }
+
+    RepeaterContactRecord record;
+    record.advertType = RowU8(row, 0);
+    record.name = RowString(row, 1);
+    record.publicKeyHex = RowString(row, 2);
+    record.lastAdvertEpoch = RowU32(row, 3);
+    record.advLatE6 = row[4] != nullptr ? static_cast<int32_t>(std::strtol(row[4], nullptr, 10)) : 0;
+    record.advLonE6 = row[5] != nullptr ? static_cast<int32_t>(std::strtol(row[5], nullptr, 10)) : 0;
+
+    mysql_free_result(result);
+    return record;
+}
+
+std::vector<MeshDB::RepeaterCoordinateRecord> MeshDB::FindRepeaterCoordinatesByPubkeyPrefixes(
+    const std::vector<std::string>& pubkeyPrefixes8)
+{
+    std::lock_guard<std::mutex> lock(s_mutex);
+    std::vector<RepeaterCoordinateRecord> records;
+
+    if (!s_ready || s_conn == nullptr || pubkeyPrefixes8.empty())
+    {
+        return records;
+    }
+
+    std::vector<std::string> prefixes;
+    prefixes.reserve(pubkeyPrefixes8.size());
+
+    for (const auto& input : pubkeyPrefixes8)
+    {
+        if (input.size() != 8)
+        {
+            continue;
+        }
+
+        std::string prefix;
+        prefix.reserve(8);
+        bool valid = true;
+
+        for (unsigned char c : input)
+        {
+            if (!std::isxdigit(c))
+            {
+                valid = false;
+                break;
+            }
+
+            prefix.push_back(static_cast<char>(std::toupper(c)));
+        }
+
+        if (!valid)
+        {
+            continue;
+        }
+
+        if (std::find(prefixes.begin(), prefixes.end(), prefix) == prefixes.end())
+        {
+            prefixes.push_back(prefix);
+        }
+    }
+
+    if (prefixes.empty())
+    {
+        return records;
+    }
+
+    std::ostringstream sql;
+    sql
+        << "SELECT "
+        << "UPPER(LEFT(public_key_hex, 8)), "
+        << "adv_lat_e6, "
+        << "adv_lon_e6 "
+        << "FROM repeaternodes "
+        << "WHERE UPPER(LEFT(public_key_hex, 8)) IN (";
+
+    for (size_t i = 0; i < prefixes.size(); i++)
+    {
+        if (i != 0)
+        {
+            sql << ",";
+        }
+
+        sql << ToSqlString(prefixes[i]);
+    }
+
+    sql << ") ORDER BY updated_at DESC";
+
+    if (mysql_query(s_conn, sql.str().c_str()) != 0)
+    {
+        std::cerr << "MeshDB SQL error: " << mysql_error(s_conn) << "\n";
+        return records;
+    }
+
+    MYSQL_RES* result = mysql_store_result(s_conn);
+
+    if (result == nullptr)
+    {
+        std::cerr << "MeshDB SQL store result error: " << mysql_error(s_conn) << "\n";
+        return records;
+    }
+
+    MYSQL_ROW row = nullptr;
+
+    while ((row = mysql_fetch_row(result)) != nullptr)
+    {
+        RepeaterCoordinateRecord record;
+        record.pubkeyPrefix8 = RowString(row, 0);
+
+        if (row[1] != nullptr)
+        {
+            record.advLatE6 = static_cast<int32_t>(std::strtol(row[1], nullptr, 10));
+        }
+
+        if (row[2] != nullptr)
+        {
+            record.advLonE6 = static_cast<int32_t>(std::strtol(row[2], nullptr, 10));
+        }
+
+        if (!record.pubkeyPrefix8.empty())
+        {
+            records.push_back(std::move(record));
+        }
+    }
+
+    mysql_free_result(result);
+    return records;
 }
 
 std::optional<std::string> MeshDB::FindNodeNameByPrefix4(
@@ -3686,7 +3877,7 @@ std::optional<MeshDB::CompanionAction> MeshDB::FetchNextQueuedCompanionAction()
 
     std::ostringstream oss;
     oss
-        << "SELECT id, action_type, IFNULL(public_key_hex, ''), IFNULL(target_name, ''), IFNULL(result_json, '') "
+        << "SELECT id, action_type, IFNULL(public_key_hex, ''), IFNULL(target_name, ''), IFNULL(auth_password, ''), IFNULL(result_json, '') "
         << "FROM companion_actions "
         << "WHERE status = " << static_cast<unsigned>(CompanionActionStatus::Queued) << " "
         << "ORDER BY created_at ASC, id ASC "
@@ -3717,7 +3908,8 @@ std::optional<MeshDB::CompanionAction> MeshDB::FetchNextQueuedCompanionAction()
     action.actionType = row[1] ? row[1] : "";
     action.publicKeyHex = row[2] ? row[2] : "";
     action.targetName = row[3] ? row[3] : "";
-    action.resultJson = row[4] ? row[4] : "";
+    action.authPassword = row[4] ? row[4] : "";
+    action.resultJson = row[5] ? row[5] : "";
 
     mysql_free_result(result);
     return action;
@@ -3736,7 +3928,8 @@ bool MeshDB::MarkCompanionActionRunning(unsigned long long id)
     oss
         << "UPDATE companion_actions "
         << "SET status = " << static_cast<unsigned>(CompanionActionStatus::Running) << ", "
-        << "    error_text = NULL "
+        << "    error_text = NULL, "
+        << "    auth_password = NULL "
         << "WHERE id = " << id << " "
         << "  AND status = " << static_cast<unsigned>(CompanionActionStatus::Queued);
 
@@ -3762,6 +3955,7 @@ bool MeshDB::MarkCompanionActionDone(unsigned long long id)
         << "UPDATE companion_actions "
         << "SET status = " << static_cast<unsigned>(CompanionActionStatus::Done) << ", "
         << "    error_text = NULL, "
+        << "    auth_password = NULL, "
         << "    processed_at = CURRENT_TIMESTAMP "
         << "WHERE id = " << id;
 
@@ -3804,6 +3998,7 @@ bool MeshDB::MarkCompanionActionFailed(
         << "UPDATE companion_actions "
         << "SET status = " << static_cast<unsigned>(CompanionActionStatus::Failed) << ", "
         << "    error_text = " << ToSqlNullableString(errorText) << ", "
+        << "    auth_password = NULL, "
         << "    processed_at = CURRENT_TIMESTAMP "
         << "WHERE id = " << id;
 
@@ -3971,7 +4166,7 @@ bool MeshDB::UpdateNodeAdvertPathFromRxLog(const DataConnector::PushRxLogInfo& i
     if (info.hasAdvertRole && info.advertRole == 2)
     {
         const bool hasBlacklistedAdvertName =
-            info.hasAdvertName && IsNodeNameBlacklisted(info.advertName);
+            !info.hasAdvertName || IsNodeNameBlacklisted(info.advertName);
 
         if (!hasBlacklistedAdvertName)
         {

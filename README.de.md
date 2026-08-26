@@ -153,6 +153,23 @@ Der Vorgang kann **mehrfach ausgeführt** werden.
 
 ------------------------------------------------------------------------
 
+## Home-Repeater-Abfrage
+
+Zusätzlich zur Repeater Discovery kann ein **Home Repeater** direkt abgefragt werden.
+
+- Name des Home Repeaters und optionales Admin-Passwort eingeben
+- Login und einzelne Abfrageseiten werden bei Funkfehlern automatisch mehrfach wiederholt
+- die komplette Nachbarliste wird seitenweise geladen, nicht nur die erste Teilmenge
+- Repeater werden über die ersten **8 Zeichen des Public Keys** mit `repeaternodes` abgeglichen
+- vorhandene Koordinaten werden übernommen und die Entfernung zum Home Repeater berechnet
+- offensichtlich unplausible Positionen mit mehr als **400 km** Entfernung werden für die Anzeige verworfen
+- die Ergebnisliste ist nach `#`, Pubkey, Name, "gehört vor", SNR und Entfernung sortierbar und kann in die Zwischenablage kopiert werden
+- Repeater mit gültigen Koordinaten können zusätzlich auf einer **OpenStreetMap-Karte** mit Verbindungslinien zum Home Repeater angezeigt werden
+
+Das Passwort wird nur für die jeweilige Abfrage verwendet und nicht dauerhaft als Repeater-Passwort gespeichert.
+
+------------------------------------------------------------------------
+
 ## TCP-Verbindung (MeshCore Companion)
 
 Neben der klassischen USB-Verbindung kann das Backend auch über TCP mit einem MeshCore Companion kommunizieren.

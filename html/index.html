@@ -18,7 +18,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Meshcore Dashboard</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-    <script src="i18n.js"></script>
+    <script src="i18n.js?v=4"></script>
     <link
         href="https://unpkg.com/tabulator-tables@6.3.0/dist/css/tabulator_midnight.min.css"
         rel="stylesheet"
@@ -1220,6 +1220,240 @@
             color: var(--muted);
             padding: 12px 0;
         }
+        #protectedRepeaterModal
+        {
+            padding: 12px;
+            box-sizing: border-box;
+        }
+
+        #protectedRepeaterModal .modal-dialog
+        {
+            width: min(96vw, 900px);
+            max-height: 82vh;
+            display: flex;
+            flex-direction: column;
+            padding: 0.65rem;
+        }
+
+        #protectedRepeaterModal .modal-header
+        {
+            padding: 0 0 0.45rem 0;
+        }
+
+        #protectedRepeaterModal .modal-header h3
+        {
+            margin: 0;
+            font-size: 1.05rem;
+        }
+
+        #protectedRepeaterModal .modal-body
+        {
+            min-height: 0;
+            padding: 0.45rem 0;
+            overflow-y: auto;
+        }
+
+        #protectedRepeaterModal .form-group
+        {
+            gap: 0.2rem;
+            margin-bottom: 0.45rem;
+        }
+
+        #protectedRepeaterModal .form-group input
+        {
+            padding: 0.4rem 0.55rem;
+            font-size: 0.9rem;
+        }
+
+        #protectedRepeaterModal .modal-footer
+        {
+            padding-top: 0.5rem;
+        }
+
+        #protectedRepeaterModal .modal-footer button
+        {
+            padding: 0.4rem 0.7rem;
+        }
+
+        .protected-repeater-result-header
+        {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+        }
+
+        .protected-repeater-result-actions
+        {
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+        }
+
+        .protected-repeater-copy-button
+        {
+            border: 1px solid #666;
+            background: #222;
+            color: #eee;
+            padding: 0.3rem 0.55rem;
+            cursor: pointer;
+            border-radius: 0.35rem;
+            font: inherit;
+            font-size: 0.85rem;
+        }
+
+        .protected-repeater-copy-button:hover:not(:disabled)
+        {
+            background: #2d2d2d;
+        }
+
+        .protected-repeater-copy-button:disabled
+        {
+            opacity: 0.5;
+            cursor: default;
+        }
+
+        .protected-repeater-summary
+        {
+            color: var(--muted);
+            font-size: 0.8rem;
+            min-height: 1em;
+        }
+
+        .protected-repeater-table-wrap
+        {
+            max-height: clamp(160px, 34vh, 320px);
+            overflow: auto;
+            border: 1px solid var(--border);
+            border-radius: 0.4rem;
+            background: rgba(0, 0, 0, 0.12);
+        }
+
+        .protected-repeater-map-wrap
+        {
+            height: clamp(220px, 38vh, 360px);
+            min-height: 220px;
+            border: 1px solid var(--border);
+            border-radius: 0.4rem;
+            overflow: hidden;
+            background: rgba(0, 0, 0, 0.12);
+        }
+
+        #protectedRepeaterMap
+        {
+            width: 100%;
+            height: 100%;
+        }
+
+        .protected-repeater-table
+        {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.84rem;
+            font-variant-numeric: tabular-nums;
+        }
+
+        .protected-repeater-table th,
+        .protected-repeater-table td
+        {
+            padding: 0.3rem 0.45rem;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+            text-align: left;
+            white-space: nowrap;
+        }
+
+        .protected-repeater-table th
+        {
+            position: sticky;
+            top: 0;
+            z-index: 1;
+            background: var(--panel-2);
+            color: var(--text);
+        }
+
+        .protected-repeater-table tbody tr:last-child td
+        {
+            border-bottom: 0;
+        }
+
+        .protected-repeater-table tbody tr:hover
+        {
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .protected-repeater-table .col-index,
+        .protected-repeater-table .col-age,
+        .protected-repeater-table .col-snr,
+        .protected-repeater-table .col-distance
+        {
+            text-align: right;
+        }
+
+        .protected-repeater-table .col-name
+        {
+            width: 100%;
+            white-space: normal;
+            min-width: 220px;
+        }
+
+        .protected-repeater-sort-button
+        {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.3rem;
+            width: 100%;
+            padding: 0;
+            border: 0;
+            background: transparent;
+            color: inherit;
+            font: inherit;
+            font-weight: 700;
+            cursor: pointer;
+            text-align: inherit;
+        }
+
+        .protected-repeater-table .col-index .protected-repeater-sort-button,
+        .protected-repeater-table .col-age .protected-repeater-sort-button,
+        .protected-repeater-table .col-snr .protected-repeater-sort-button,
+        .protected-repeater-table .col-distance .protected-repeater-sort-button
+        {
+            justify-content: flex-end;
+        }
+
+        .protected-repeater-sort-indicator
+        {
+            min-width: 0.8em;
+            color: var(--muted);
+            font-size: 0.75em;
+        }
+
+        .protected-repeater-result-fallback
+        {
+            margin: 0;
+            padding: 0.55rem;
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
+        }
+
+        @media (max-height: 700px)
+        {
+            #protectedRepeaterModal .modal-dialog
+            {
+                max-height: 94vh;
+            }
+
+            .protected-repeater-table-wrap
+            {
+                max-height: 30vh;
+            }
+
+            .protected-repeater-map-wrap
+            {
+                height: 34vh;
+                min-height: 180px;
+            }
+        }
+
         .status-running
         .status-running-icon
         {
@@ -2148,8 +2382,64 @@
                 </div>
 
                 <div class="form-group">
-                    <label data-i18n="protected_repeater.result.label">Antwort</label>
-                    <pre id="protectedRepeaterResult" class="protected-repeater-result"></pre>
+                    <label for="protectedRepeaterPasswordInput" data-i18n="protected_repeater.password.label">Passwort</label>
+                    <input id="protectedRepeaterPasswordInput" type="password" autocomplete="off" maxlength="15">
+                </div>
+
+                <div class="form-group">
+                    <div class="protected-repeater-result-header">
+                        <label data-i18n="protected_repeater.result.label">Antwort</label>
+                        <div class="protected-repeater-result-actions">
+                            <button id="protectedRepeaterMapButton" class="protected-repeater-copy-button" type="button" disabled data-i18n="protected_repeater.button.map">Karte</button>
+                            <button id="protectedRepeaterCopyButton" class="protected-repeater-copy-button" type="button" disabled>
+                                <span data-i18n="protected_repeater.button.copy">Liste kopieren</span>
+                            </button>
+                        </div>
+                    </div>
+                    <div id="protectedRepeaterSummary" class="protected-repeater-summary"></div>
+                    <div id="protectedRepeaterTableWrap" class="protected-repeater-table-wrap">
+                        <table id="protectedRepeaterTable" class="protected-repeater-table">
+                            <thead>
+                                <tr>
+                                    <th class="col-index" scope="col" data-sort-column="index">
+                                        <button class="protected-repeater-sort-button" type="button" data-sort-key="index">
+                                            <span>#</span><span class="protected-repeater-sort-indicator" data-sort-indicator="index"></span>
+                                        </button>
+                                    </th>
+                                    <th scope="col" data-sort-column="pubkey">
+                                        <button class="protected-repeater-sort-button" type="button" data-sort-key="pubkey">
+                                            <span data-i18n="protected_repeater.column.pubkey">pubkey</span><span class="protected-repeater-sort-indicator" data-sort-indicator="pubkey"></span>
+                                        </button>
+                                    </th>
+                                    <th class="col-name" scope="col" data-sort-column="name">
+                                        <button class="protected-repeater-sort-button" type="button" data-sort-key="name">
+                                            <span data-i18n="protected_repeater.column.name">Name</span><span class="protected-repeater-sort-indicator" data-sort-indicator="name"></span>
+                                        </button>
+                                    </th>
+                                    <th class="col-age" scope="col" data-sort-column="secsAgo">
+                                        <button class="protected-repeater-sort-button" type="button" data-sort-key="secsAgo">
+                                            <span data-i18n="protected_repeater.column.heard_ago">gehört vor</span><span class="protected-repeater-sort-indicator" data-sort-indicator="secsAgo"></span>
+                                        </button>
+                                    </th>
+                                    <th class="col-snr" scope="col" data-sort-column="snr">
+                                        <button class="protected-repeater-sort-button" type="button" data-sort-key="snr">
+                                            <span data-i18n="protected_repeater.column.snr">SNR</span><span class="protected-repeater-sort-indicator" data-sort-indicator="snr"></span>
+                                        </button>
+                                    </th>
+                                    <th class="col-distance" scope="col" data-sort-column="distanceM">
+                                        <button class="protected-repeater-sort-button" type="button" data-sort-key="distanceM">
+                                            <span data-i18n="protected_repeater.column.distance">Entfernung</span><span class="protected-repeater-sort-indicator" data-sort-indicator="distanceM"></span>
+                                        </button>
+                                    </th>
+                                </tr>
+                            </thead>
+                            <tbody id="protectedRepeaterTableBody"></tbody>
+                        </table>
+                        <pre id="protectedRepeaterResult" class="protected-repeater-result-fallback" style="display:none;"></pre>
+                    </div>
+                    <div id="protectedRepeaterMapWrap" class="protected-repeater-map-wrap" style="display:none;">
+                        <div id="protectedRepeaterMap"></div>
+                    </div>
                 </div>
 
                 <div id="protectedRepeaterModalError" class="modal-error" style="display:none;"></div>
@@ -2219,7 +2509,7 @@
     <script src="https://unpkg.com/tabulator-tables@6.3.0/dist/js/tabulator.min.js"></script>
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="meshcore-shared.js?v=3"></script>
-    <script src="meshcore-api.js?v=3"></script>
-    <script src="app.js?v=3"></script>
+    <script src="meshcore-api.js?v=5"></script>
+    <script src="app.js?v=12"></script>
 </body>
 </html>

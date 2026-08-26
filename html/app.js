@@ -212,7 +212,16 @@ const el =
     protectedRepeaterModal: document.getElementById("protectedRepeaterModal"),
     protectedRepeaterStatusText: document.getElementById("protectedRepeaterStatusText"),
     protectedRepeaterNameInput: document.getElementById("protectedRepeaterNameInput"),
+    protectedRepeaterPasswordInput: document.getElementById("protectedRepeaterPasswordInput"),
     protectedRepeaterResult: document.getElementById("protectedRepeaterResult"),
+    protectedRepeaterSummary: document.getElementById("protectedRepeaterSummary"),
+    protectedRepeaterTable: document.getElementById("protectedRepeaterTable"),
+    protectedRepeaterTableBody: document.getElementById("protectedRepeaterTableBody"),
+    protectedRepeaterTableWrap: document.getElementById("protectedRepeaterTableWrap"),
+    protectedRepeaterCopyButton: document.getElementById("protectedRepeaterCopyButton"),
+    protectedRepeaterMapButton: document.getElementById("protectedRepeaterMapButton"),
+    protectedRepeaterMapWrap: document.getElementById("protectedRepeaterMapWrap"),
+    protectedRepeaterMap: document.getElementById("protectedRepeaterMap"),
     protectedRepeaterStartButton: document.getElementById("protectedRepeaterStartButton"),
     protectedRepeaterCloseButton: document.getElementById("protectedRepeaterCloseButton"),
     protectedRepeaterModalError: document.getElementById("protectedRepeaterModalError"),
@@ -288,6 +297,16 @@ const state =
     protectedRepeaterModalOpen: false,
     protectedRepeaterPending: false,
     protectedRepeaterActionId: null,
+    protectedRepeaterRenderedActionId: null,
+    protectedRepeaterRows: [],
+    protectedRepeaterTotalCount: 0,
+    protectedRepeaterSortKey: "index",
+    protectedRepeaterSortDirection: "asc",
+    protectedRepeaterHome: null,
+    protectedRepeaterMap: null,
+    protectedRepeaterMapLayer: null,
+    protectedRepeaterMapAutoFit: true,
+    protectedRepeaterView: "table",
     rightTab: "messages",
     rightPanelMode: "messages",
     monitorTable: null,
@@ -1823,9 +1842,9 @@ async function clearDiscoverRequest()
     return await MeshCoreApi.clearDiscoverRequest();
 }
 
-async function startProtectedRepeaterRequest()
+async function startProtectedRepeaterRequest(targetName, password)
 {
-    return await MeshCoreApi.startProtectedRepeaterRequest();
+    return await MeshCoreApi.startProtectedRepeaterRequest(targetName, password);
 }
 
 async function loadProtectedRepeaterStatus()
@@ -1930,6 +1949,26 @@ function formatSnr(value)
     return Number.isInteger(value) ? value.toFixed(1) : String(value);
 }
 
+function formatDistance(distanceMeters)
+{
+    if (distanceMeters === null || distanceMeters === undefined || !Number.isFinite(Number(distanceMeters)))
+    {
+        return "-";
+    }
+
+    const meters = Math.max(0, Number(distanceMeters));
+
+    if (meters < 1000)
+    {
+        return `${Math.round(meters)} m`;
+    }
+
+    return `${(meters / 1000).toLocaleString(undefined, {
+        minimumFractionDigits: 1,
+        maximumFractionDigits: 1
+    })} km`;
+}
+
 function formatTime(totalSeconds)
 {
     const seconds = Math.max(0, Number(totalSeconds) || 0);
@@ -1950,12 +1989,9 @@ function formatTime(totalSeconds)
     );
 }
 
-function formatProtectedRepeaterResult(resultJson, repeaterNames = {})
+function parseProtectedRepeaterResult(resultJson, repeaterNames = {})
 {
-    if (!resultJson)
-    {
-        return "";
-    }
+    if (!resultJson) return null;
 
     let payload = null;
 
@@ -1965,38 +2001,515 @@ function formatProtectedRepeaterResult(resultJson, repeaterNames = {})
     }
     catch (error)
     {
-        return resultJson;
+        throw new Error(String(resultJson));
     }
+
+    const decoded = decodeNeighboursHex(payload.raw_hex || "");
+    const detailsByPubkey = new Map();
+
+    if (Array.isArray(payload.neighbours))
+    {
+        payload.neighbours.forEach(function(neighbour)
+        {
+            const pubkey = String(neighbour.pubkey_prefix8 || "").toLowerCase();
+            if (!pubkey) return;
+
+            const distance = neighbour.distance_m;
+            const latE6 = neighbour.lat_e6;
+            const lonE6 = neighbour.lon_e6;
+
+            detailsByPubkey.set(pubkey,
+            {
+                distanceM: distance === null || distance === undefined ? null : Number(distance),
+                latE6: latE6 === null || latE6 === undefined ? null : Number(latE6),
+                lonE6: lonE6 === null || lonE6 === undefined ? null : Number(lonE6)
+            });
+        });
+    }
+
+    const homePayload = payload.home && typeof payload.home === "object" ? payload.home : null;
+    const home = homePayload
+        ? {
+            pubkey: String(homePayload.pubkey_prefix8 || "").toLowerCase(),
+            name: String(homePayload.name || payload.repeater_name || "Home Repeater"),
+            latE6: homePayload.lat_e6 === null || homePayload.lat_e6 === undefined
+                ? null
+                : Number(homePayload.lat_e6),
+            lonE6: homePayload.lon_e6 === null || homePayload.lon_e6 === undefined
+                ? null
+                : Number(homePayload.lon_e6)
+        }
+        : null;
+
+    const rows = decoded.neighbours.map(function(neighbour, index)
+    {
+        const details = detailsByPubkey.get(neighbour.pubkey) || {};
+
+        return {
+            index: index + 1,
+            pubkey: neighbour.pubkey,
+            name: repeaterNames[neighbour.pubkey] || "-",
+            secsAgo: neighbour.secsAgo,
+            snr: neighbour.snr,
+            distanceM: details.distanceM ?? null,
+            latE6: details.latE6 ?? null,
+            lonE6: details.lonE6 ?? null
+        };
+    });
+
+    return {
+        totalCount: decoded.totalCount,
+        resultCount: decoded.resultCount,
+        home: home,
+        rows: rows
+    };
+}
+
+function getSortedProtectedRepeaterRows()
+{
+    const rows = state.protectedRepeaterRows.slice();
+    const key = state.protectedRepeaterSortKey;
+    const direction = state.protectedRepeaterSortDirection === "desc" ? -1 : 1;
+
+    rows.sort(function(a, b)
+    {
+        let result = 0;
+
+        if (key === "name" || key === "pubkey")
+        {
+            result = String(a[key] || "").localeCompare(String(b[key] || ""), undefined, {
+                sensitivity: "base",
+                numeric: true
+            });
+        }
+        else if (key === "distanceM")
+        {
+            const aMissing = a.distanceM === null || !Number.isFinite(Number(a.distanceM));
+            const bMissing = b.distanceM === null || !Number.isFinite(Number(b.distanceM));
+
+            if (aMissing && bMissing) result = 0;
+            else if (aMissing) return 1;
+            else if (bMissing) return -1;
+            else result = Number(a.distanceM) - Number(b.distanceM);
+        }
+        else
+        {
+            result = Number(a[key]) - Number(b[key]);
+        }
+
+        if (result === 0) result = a.index - b.index;
+        return result * direction;
+    });
+
+    return rows;
+}
+
+function updateProtectedRepeaterSortIndicators()
+{
+    document.querySelectorAll("[data-sort-indicator]").forEach(function(indicator)
+    {
+        const active = indicator.dataset.sortIndicator === state.protectedRepeaterSortKey;
+        indicator.textContent = active
+            ? (state.protectedRepeaterSortDirection === "asc" ? "▲" : "▼")
+            : "";
+    });
+
+    document.querySelectorAll("#protectedRepeaterTable th[data-sort-column]").forEach(function(header)
+    {
+        const active = header.dataset.sortColumn === state.protectedRepeaterSortKey;
+        header.setAttribute("aria-sort", active
+            ? (state.protectedRepeaterSortDirection === "asc" ? "ascending" : "descending")
+            : "none");
+    });
+}
+
+function renderProtectedRepeaterTable()
+{
+    if (!el.protectedRepeaterTableBody) return;
+
+    const rows = getSortedProtectedRepeaterRows();
+    el.protectedRepeaterTableBody.replaceChildren();
+
+    rows.forEach(function(row)
+    {
+        const trNode = document.createElement("tr");
+        const values = [
+            ["col-index", String(row.index)],
+            ["", row.pubkey],
+            ["col-name", row.name],
+            ["col-age", formatTime(row.secsAgo)],
+            ["col-snr", formatSnr(row.snr)],
+            ["col-distance", formatDistance(row.distanceM)]
+        ];
+
+        values.forEach(function(value)
+        {
+            const tdNode = document.createElement("td");
+            if (value[0]) tdNode.className = value[0];
+            tdNode.textContent = value[1];
+            trNode.appendChild(tdNode);
+        });
+
+        el.protectedRepeaterTableBody.appendChild(trNode);
+    });
+
+    updateProtectedRepeaterSortIndicators();
+}
+
+function hasProtectedRepeaterCoordinates(item)
+{
+    if (!item) return false;
+
+    if (item.latE6 === null || item.latE6 === undefined
+        || item.lonE6 === null || item.lonE6 === undefined)
+    {
+        return false;
+    }
+
+    const latE6 = Number(item.latE6);
+    const lonE6 = Number(item.lonE6);
+
+    return Number.isFinite(latE6)
+        && Number.isFinite(lonE6)
+        && latE6 >= -90000000
+        && latE6 <= 90000000
+        && lonE6 >= -180000000
+        && lonE6 <= 180000000;
+}
+
+function hasProtectedRepeaterMapData()
+{
+    if (!hasProtectedRepeaterCoordinates(state.protectedRepeaterHome))
+    {
+        return false;
+    }
+
+    return state.protectedRepeaterRows.some(hasProtectedRepeaterCoordinates);
+}
+
+function ensureProtectedRepeaterMap()
+{
+    if (!el.protectedRepeaterMap)
+    {
+        return null;
+    }
+
+    if (!state.protectedRepeaterMap)
+    {
+        state.protectedRepeaterMap = L.map("protectedRepeaterMap",
+        {
+            zoomControl: true,
+            wheelPxPerZoomLevel: 240,
+            zoomSnap: 0.25
+        });
+
+        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+        {
+            maxZoom: 19,
+            attribution: "&copy; OpenStreetMap"
+        }).addTo(state.protectedRepeaterMap);
+
+        state.protectedRepeaterMapLayer = L.layerGroup().addTo(state.protectedRepeaterMap);
+
+        const disableAutoFit = function()
+        {
+            state.protectedRepeaterMapAutoFit = false;
+        };
+
+        const mapContainer = state.protectedRepeaterMap.getContainer();
+        mapContainer.addEventListener("mousedown", disableAutoFit, { passive: true });
+        mapContainer.addEventListener("wheel", disableAutoFit, { passive: true });
+        mapContainer.addEventListener("touchstart", disableAutoFit, { passive: true });
+    }
+
+    return state.protectedRepeaterMap;
+}
+
+function buildProtectedRepeaterMapPopup(row, isHome = false)
+{
+    const title = isHome
+        ? `${tr("protected_repeater.map.home", "Home Repeater")}: ${row.name || "-"}`
+        : (row.name || "-");
+
+    const lines = [
+        `<strong>${escapeHtml(title)}</strong>`,
+        `${escapeHtml(tr("protected_repeater.column.pubkey", "pubkey"))}: ${escapeHtml(row.pubkey || "-")}`
+    ];
+
+    if (!isHome)
+    {
+        lines.push(
+            `${escapeHtml(tr("protected_repeater.column.heard_ago", "gehört vor"))}: ${escapeHtml(formatTime(row.secsAgo))}`,
+            `${escapeHtml(tr("protected_repeater.column.snr", "SNR"))}: ${escapeHtml(formatSnr(row.snr))} dB`,
+            `${escapeHtml(tr("protected_repeater.column.distance", "Entfernung"))}: ${escapeHtml(formatDistance(row.distanceM))}`
+        );
+    }
+
+    return lines.join("<br>");
+}
+
+function renderProtectedRepeaterMap()
+{
+    if (!hasProtectedRepeaterMapData())
+    {
+        return;
+    }
+
+    const map = ensureProtectedRepeaterMap();
+
+    if (!map || !state.protectedRepeaterMapLayer)
+    {
+        return;
+    }
+
+    state.protectedRepeaterMapLayer.clearLayers();
+
+    const home = state.protectedRepeaterHome;
+    const homeLat = Number(home.latE6) / 1000000.0;
+    const homeLon = Number(home.lonE6) / 1000000.0;
+    const homeLatLng = [homeLat, homeLon];
+    const bounds = [homeLatLng];
+
+    const homeMarker = L.circleMarker(homeLatLng,
+    {
+        radius: 5,
+        color: "#000000",
+        weight: 1,
+        fillColor: "#20a840",
+        fillOpacity: 1
+    }).addTo(state.protectedRepeaterMapLayer);
+    homeMarker.bindPopup(buildProtectedRepeaterMapPopup(home, true));
+
+    state.protectedRepeaterRows.forEach(function(row)
+    {
+        if (!hasProtectedRepeaterCoordinates(row))
+        {
+            return;
+        }
+
+        const lat = Number(row.latE6) / 1000000.0;
+        const lon = Number(row.lonE6) / 1000000.0;
+        const latLng = [lat, lon];
+        bounds.push(latLng);
+
+        const marker = L.circleMarker(latLng,
+        {
+            radius: 4,
+            color: "#000000",
+            weight: 1,
+            fillColor: "#d02020",
+            fillOpacity: 1
+        }).addTo(state.protectedRepeaterMapLayer);
+        marker.bindPopup(buildProtectedRepeaterMapPopup(row, false));
+
+        L.polyline([homeLatLng, latLng],
+        {
+            weight: 1.5,
+            opacity: 0.65
+        }).addTo(state.protectedRepeaterMapLayer);
+
+    });
+
+    window.setTimeout(function()
+    {
+        map.invalidateSize();
+
+        if (!state.protectedRepeaterMapAutoFit)
+        {
+            return;
+        }
+
+        if (bounds.length === 1)
+        {
+            map.setView(bounds[0], 10);
+        }
+        else
+        {
+            map.fitBounds(bounds, { padding: [24, 24], maxZoom: 12 });
+        }
+    }, 0);
+}
+
+function updateProtectedRepeaterView()
+{
+    const mapAvailable = hasProtectedRepeaterMapData();
+    const showMap = state.protectedRepeaterView === "map" && mapAvailable;
+
+    if (el.protectedRepeaterTableWrap)
+    {
+        el.protectedRepeaterTableWrap.style.display = showMap ? "none" : "block";
+    }
+
+    if (el.protectedRepeaterMapWrap)
+    {
+        el.protectedRepeaterMapWrap.style.display = showMap ? "block" : "none";
+    }
+
+    if (el.protectedRepeaterMapButton)
+    {
+        el.protectedRepeaterMapButton.disabled = !mapAvailable;
+        el.protectedRepeaterMapButton.textContent = state.protectedRepeaterView === "map"
+            ? tr("protected_repeater.button.list", "Liste")
+            : tr("protected_repeater.button.map", "Karte");
+    }
+
+    if (showMap)
+    {
+        renderProtectedRepeaterMap();
+    }
+}
+
+function setProtectedRepeaterView(view)
+{
+    if (view === "map" && !hasProtectedRepeaterMapData())
+    {
+        return;
+    }
+
+    state.protectedRepeaterView = view === "map" ? "map" : "table";
+    updateProtectedRepeaterView();
+}
+
+function clearProtectedRepeaterResult(resetView = false)
+{
+    state.protectedRepeaterRows = [];
+    state.protectedRepeaterTotalCount = 0;
+    state.protectedRepeaterHome = null;
+
+    if (resetView)
+    {
+        state.protectedRepeaterView = "table";
+        state.protectedRepeaterMapAutoFit = true;
+    }
+
+    if (state.protectedRepeaterMapLayer) state.protectedRepeaterMapLayer.clearLayers();
+    if (el.protectedRepeaterTableBody) el.protectedRepeaterTableBody.replaceChildren();
+    if (el.protectedRepeaterSummary) el.protectedRepeaterSummary.textContent = "";
+    if (el.protectedRepeaterCopyButton) el.protectedRepeaterCopyButton.disabled = true;
+    if (el.protectedRepeaterMapButton) el.protectedRepeaterMapButton.disabled = true;
+
+    if (el.protectedRepeaterTable) el.protectedRepeaterTable.style.display = "table";
+    if (el.protectedRepeaterResult)
+    {
+        el.protectedRepeaterResult.textContent = "";
+        el.protectedRepeaterResult.style.display = "none";
+    }
+
+    updateProtectedRepeaterView();
+}
+
+function renderProtectedRepeaterResult(resultJson, repeaterNames = {})
+{
+    clearProtectedRepeaterResult();
+    if (!resultJson) return;
 
     try
     {
-        const decoded = decodeNeighboursHex(payload.raw_hex || "");
-        const lines = [
-            `total_count: ${decoded.totalCount}`,
-            `result_count: ${decoded.resultCount}`,
-            "",
-            " # pubkey   Name                 hh:mm:ss  SNR[dB]"
-        ];
+        const result = parseProtectedRepeaterResult(resultJson, repeaterNames);
+        if (!result) return;
 
-        decoded.neighbours.forEach(function(neighbour, index)
+        state.protectedRepeaterRows = result.rows;
+        state.protectedRepeaterTotalCount = result.totalCount;
+        state.protectedRepeaterHome = result.home;
+
+        if (el.protectedRepeaterSummary)
         {
-            const repeaterName =
-                repeaterNames[neighbour.pubkey] || "-";
-
-            lines.push(
-                `${String(index + 1).padStart(2, " ")} ` +
-                `${neighbour.pubkey} ` +
-                `${repeaterName.padEnd(20, " ")} ` +
-                `${formatTime(neighbour.secsAgo).padStart(8, " ")} ` +
-                `${formatSnr(neighbour.snr).padStart(7, " ")}`
+            el.protectedRepeaterSummary.textContent = tr(
+                "protected_repeater.result.summary",
+                `${result.resultCount} von ${result.totalCount} Einträgen`,
+                { result: result.resultCount, total: result.totalCount }
             );
-        });
+        }
 
-        return lines.join("\n");
+        if (el.protectedRepeaterCopyButton) el.protectedRepeaterCopyButton.disabled = result.rows.length === 0;
+        renderProtectedRepeaterTable();
+        updateProtectedRepeaterView();
     }
     catch (error)
     {
-        return `${tr("protected_repeater.decode.failed", "Antwort konnte nicht dekodiert werden:")} ${error.message}\n\n${resultJson}`;
+        if (el.protectedRepeaterTable) el.protectedRepeaterTable.style.display = "none";
+        if (el.protectedRepeaterResult)
+        {
+            el.protectedRepeaterResult.style.display = "block";
+            el.protectedRepeaterResult.textContent =
+                `${tr("protected_repeater.decode.failed", "Antwort konnte nicht dekodiert werden:")} ${error.message}`;
+        }
+    }
+}
+
+function buildProtectedRepeaterClipboardText()
+{
+    const lines = [[
+        "#",
+        tr("protected_repeater.column.pubkey", "pubkey"),
+        tr("protected_repeater.column.name", "Name"),
+        tr("protected_repeater.column.heard_ago", "gehört vor"),
+        `${tr("protected_repeater.column.snr", "SNR")}[dB]`,
+        tr("protected_repeater.column.distance", "Entfernung")
+    ].join("\t")];
+
+    getSortedProtectedRepeaterRows().forEach(function(row)
+    {
+        lines.push([
+            row.index,
+            row.pubkey,
+            row.name,
+            formatTime(row.secsAgo),
+            formatSnr(row.snr),
+            formatDistance(row.distanceM)
+        ].join("\t"));
+    });
+
+    return lines.join("\n");
+}
+
+async function copyProtectedRepeaterTable()
+{
+    const text = buildProtectedRepeaterClipboardText();
+    if (state.protectedRepeaterRows.length === 0) return;
+
+    try
+    {
+        if (navigator.clipboard && window.isSecureContext)
+        {
+            await navigator.clipboard.writeText(text);
+        }
+        else
+        {
+            const textarea = document.createElement("textarea");
+            textarea.value = text;
+            textarea.style.position = "fixed";
+            textarea.style.opacity = "0";
+            document.body.appendChild(textarea);
+            textarea.focus();
+            textarea.select();
+
+            if (!document.execCommand("copy")) throw new Error("copy failed");
+            textarea.remove();
+        }
+
+        if (el.protectedRepeaterCopyButton)
+        {
+            const label = el.protectedRepeaterCopyButton.querySelector("span");
+            const oldText = label ? label.textContent : "";
+            if (label) label.textContent = tr("protected_repeater.button.copied", "Kopiert");
+
+            window.setTimeout(function()
+            {
+                if (label) label.textContent = oldText || tr("protected_repeater.button.copy", "Liste kopieren");
+            }, 1200);
+        }
+    }
+    catch (error)
+    {
+        if (el.protectedRepeaterModalError)
+        {
+            el.protectedRepeaterModalError.textContent = tr(
+                "protected_repeater.error.copy_failed",
+                "Liste konnte nicht in die Zwischenablage kopiert werden."
+            );
+            el.protectedRepeaterModalError.style.display = "block";
+        }
     }
 }
 
@@ -2013,15 +2526,10 @@ function renderProtectedRepeaterStatus(data)
         el.protectedRepeaterNameInput.value = targetName || "";
     }
 
-    if (el.protectedRepeaterResult)
-    {
-        el.protectedRepeaterResult.textContent = action && action.result_json
-            ? formatProtectedRepeaterResult(action.result_json, action.repeater_names || {})
-            : "";
-    }
-
     if (!action)
     {
+        state.protectedRepeaterPending = false;
+        stopProtectedRepeaterPolling();
         setProtectedRepeaterStatus(tr("protected_repeater.status.ready", "Bereit"));
 
         if (el.protectedRepeaterStartButton)
@@ -2032,9 +2540,27 @@ function renderProtectedRepeaterStatus(data)
         return;
     }
 
-    if (Number(action.status) === 3)
+    const actionId = Number(action.id) || null;
+    const actionStatus = Number(action.status);
+    state.protectedRepeaterActionId = actionId;
+
+    if (actionStatus === 3)
     {
         state.protectedRepeaterPending = false;
+
+        // A completed neighbour result is immutable. Render it exactly once for
+        // this action and stop polling; table/map then remain untouched until
+        // the next explicit START request.
+        if (state.protectedRepeaterRenderedActionId !== actionId)
+        {
+            renderProtectedRepeaterResult(
+                action.result_json || "",
+                action.repeater_names || {}
+            );
+            state.protectedRepeaterRenderedActionId = actionId;
+        }
+
+        stopProtectedRepeaterPolling();
         setProtectedRepeaterStatus(tr("protected_repeater.status.done", "Antwort verfügbar"));
 
         if (el.protectedRepeaterStartButton)
@@ -2045,9 +2571,10 @@ function renderProtectedRepeaterStatus(data)
         return;
     }
 
-    if (Number(action.status) === 2)
+    if (actionStatus === 2)
     {
         state.protectedRepeaterPending = false;
+        stopProtectedRepeaterPolling();
         setProtectedRepeaterStatus(tr("protected_repeater.status.failed", "Fehler"));
 
         if (el.protectedRepeaterStartButton)
@@ -2058,6 +2585,9 @@ function renderProtectedRepeaterStatus(data)
         return;
     }
 
+    // queued/running: only update status. Do not rebuild the result/table/map
+    // on every polling tick.
+    state.protectedRepeaterPending = true;
     setProtectedRepeaterStatus(tr("protected_repeater.status.waiting", "Warte auf Antwort ..."));
 
     if (el.protectedRepeaterStartButton)
@@ -2091,43 +2621,6 @@ async function refreshProtectedRepeaterModal()
     }
 }
 
-async function saveProtectedRepeaterNameBeforeRequest()
-{
-    const homeRepeaterName = el.protectedRepeaterNameInput ? el.protectedRepeaterNameInput.value.trim() : "";
-
-    if (homeRepeaterName.length > 64)
-    {
-        throw new Error(tr("setup.error.home_repeater_too_long", "Home Repeater ist zu lang."));
-    }
-
-    const setupData = await loadCompanionSetup();
-    const cfg = setupData && setupData.config ? setupData.config : null;
-
-    if (!cfg)
-    {
-        throw new Error(tr("setup.error.load_failed", "Setup-Werte konnten nicht geladen werden."));
-    }
-
-    const name = cfg.name ? String(cfg.name).trim() : "";
-    const latitude = Number(cfg.latitude);
-    const longitude = Number(cfg.longitude);
-
-    if (name === "" || !Number.isFinite(latitude) || !Number.isFinite(longitude))
-    {
-        throw new Error(tr("setup.error.load_failed", "Setup-Werte konnten nicht geladen werden."));
-    }
-
-    await MeshCoreApi.applyCompanionSetup(
-    {
-        name: name,
-        location_name: cfg.location_name || "",
-        protected_repeater_name: homeRepeaterName,
-        latitude: latitude,
-        longitude: longitude,
-        bot: cfg.bot === true || Number(cfg.bot) === 1
-    });
-}
-
 async function handleProtectedRepeaterStartClick()
 {
     if (state.protectedRepeaterPending)
@@ -2137,6 +2630,7 @@ async function handleProtectedRepeaterStartClick()
 
     state.protectedRepeaterPending = true;
     state.protectedRepeaterActionId = null;
+    state.protectedRepeaterRenderedActionId = null;
 
     if (el.protectedRepeaterModalError)
     {
@@ -2144,10 +2638,7 @@ async function handleProtectedRepeaterStartClick()
         el.protectedRepeaterModalError.style.display = "none";
     }
 
-    if (el.protectedRepeaterResult)
-    {
-        el.protectedRepeaterResult.textContent = "";
-    }
+    clearProtectedRepeaterResult(true);
 
     setProtectedRepeaterStatus(tr("protected_repeater.status.waiting", "Warte auf Antwort ..."));
 
@@ -2158,9 +2649,31 @@ async function handleProtectedRepeaterStartClick()
 
     try
     {
-        await saveProtectedRepeaterNameBeforeRequest();
-        const response = await startProtectedRepeaterRequest();
+        const homeRepeaterName = el.protectedRepeaterNameInput ? el.protectedRepeaterNameInput.value.trim() : "";
+        const password = el.protectedRepeaterPasswordInput ? el.protectedRepeaterPasswordInput.value : "";
+
+        if (homeRepeaterName === "")
+        {
+            throw new Error(tr("protected_repeater.error.name_missing", "Home Repeater fehlt."));
+        }
+
+        if (homeRepeaterName.length > 64)
+        {
+            throw new Error(tr("setup.error.home_repeater_too_long", "Home Repeater ist zu lang."));
+        }
+
+        const passwordBytes = new TextEncoder().encode(password).length;
+        if (passwordBytes > 15)
+        {
+            throw new Error(tr("protected_repeater.error.password_too_long", "Passwort darf maximal 15 Byte lang sein."));
+        }
+
+        const response = await startProtectedRepeaterRequest(homeRepeaterName, password);
         state.protectedRepeaterActionId = response && response.action_id ? Number(response.action_id) : null;
+
+        // A previous completed request has already stopped polling. A new START
+        // explicitly starts it again until this action reaches done/failed.
+        startProtectedRepeaterPolling();
         await refreshProtectedRepeaterModal();
     }
     catch (error)
@@ -2230,12 +2743,18 @@ async function openProtectedRepeaterDialog()
         el.protectedRepeaterNameInput.focus();
     }
 
-    startProtectedRepeaterPolling();
+    // Only unfinished actions need background polling. Completed results are
+    // static and have already been rendered once by refresh above.
+    if (state.protectedRepeaterPending)
+    {
+        startProtectedRepeaterPolling();
+    }
 }
 
 function closeProtectedRepeaterDialog()
 {
     state.protectedRepeaterModalOpen = false;
+    state.protectedRepeaterView = "table";
     stopProtectedRepeaterPolling();
 
     if (!el.protectedRepeaterModal)
@@ -2245,6 +2764,11 @@ function closeProtectedRepeaterDialog()
 
     el.protectedRepeaterModal.classList.remove("visible");
     el.protectedRepeaterModal.setAttribute("aria-hidden", "true");
+
+    if (el.protectedRepeaterPasswordInput)
+    {
+        el.protectedRepeaterPasswordInput.value = "";
+    }
 
     if (el.protectedRepeaterModalError)
     {
@@ -5944,6 +6468,40 @@ if (el.protectedRepeaterButton)
 if (el.protectedRepeaterStartButton)
 {
     el.protectedRepeaterStartButton.addEventListener("click", handleProtectedRepeaterStartClick);
+}
+
+document.querySelectorAll("#protectedRepeaterTable [data-sort-key]").forEach(function(button)
+{
+    button.addEventListener("click", function()
+    {
+        const key = button.dataset.sortKey;
+
+        if (state.protectedRepeaterSortKey === key)
+        {
+            state.protectedRepeaterSortDirection =
+                state.protectedRepeaterSortDirection === "asc" ? "desc" : "asc";
+        }
+        else
+        {
+            state.protectedRepeaterSortKey = key;
+            state.protectedRepeaterSortDirection = "asc";
+        }
+
+        renderProtectedRepeaterTable();
+    });
+});
+
+if (el.protectedRepeaterCopyButton)
+{
+    el.protectedRepeaterCopyButton.addEventListener("click", copyProtectedRepeaterTable);
+}
+
+if (el.protectedRepeaterMapButton)
+{
+    el.protectedRepeaterMapButton.addEventListener("click", function()
+    {
+        setProtectedRepeaterView(state.protectedRepeaterView === "map" ? "table" : "map");
+    });
 }
 
 if (el.protectedRepeaterCloseButton)

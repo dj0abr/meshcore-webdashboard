@@ -110,6 +110,7 @@ try
     $db->set_charset('utf8mb4');
 
     $command = (string) ($_GET['command'] ?? '');
+    $data = [];
 
     if ($_SERVER['REQUEST_METHOD'] === 'POST')
     {
@@ -122,39 +123,79 @@ try
 
     if ($command === 'start')
     {
-        $stmt = $db->prepare('
-            SELECT protected_repeater_name
-            FROM companion_config
-            WHERE id = 1
-            LIMIT 1
-        ');
-        $stmt->execute();
-        $result = $stmt->get_result();
-        $config = $result->fetch_assoc();
-        $stmt->close();
+        $targetName = trim((string) ($data['target_name'] ?? ''));
+        $authPassword = (string) ($data['auth_password'] ?? '');
 
-        $targetName = trim((string) ($config['protected_repeater_name'] ?? ''));
+        // Backward-compatible fallback for clients with a cached older
+        // meshcore-api.js which sends only {command:"start"}.
+        if ($targetName === '')
+        {
+            $stmt = $db->prepare('SELECT protected_repeater_name FROM companion_config WHERE id = 1 LIMIT 1');
+            $stmt->execute();
+            $result = $stmt->get_result();
+            $row = $result->fetch_assoc();
+            $stmt->close();
+
+            if ($row !== null)
+            {
+                $targetName = trim((string) ($row['protected_repeater_name'] ?? ''));
+            }
+        }
 
         if ($targetName === '')
         {
-            throw new RuntimeException('Kein Home Repeater konfiguriert.');
+            throw new RuntimeException('Kein Home Repeater angegeben.');
         }
+
+        if (mb_strlen($targetName, 'UTF-8') > 64)
+        {
+            throw new RuntimeException('Home Repeater ist zu lang.');
+        }
+
+        if (strlen($authPassword) > 15)
+        {
+            throw new RuntimeException('Passwort darf maximal 15 Byte lang sein.');
+        }
+
+        // Only persist the Home Repeater name. Do NOT set apply_pending here:
+        // a neighbour query must not reconfigure the radio or send a self advert.
+        $stmt = $db->prepare('
+            UPDATE companion_config
+            SET protected_repeater_name = ?
+            WHERE id = 1
+        ');
+        $stmt->bind_param('s', $targetName);
+        $stmt->execute();
+
+        if ($stmt->affected_rows === 0)
+        {
+            $check = $db->query('SELECT id FROM companion_config WHERE id = 1 LIMIT 1');
+            if ($check->fetch_assoc() === null)
+            {
+                $stmt->close();
+                throw new RuntimeException('Companion Setup ist nicht konfiguriert.');
+            }
+        }
+
+        $stmt->close();
 
         $stmt = $db->prepare('
             INSERT INTO companion_actions
             (
                 action_type,
                 target_name,
+                auth_password,
                 status
             )
             VALUES
             (
                 \'req_neighbours\',
                 ?,
+                NULLIF(?, \'\'),
                 0
             )
         ');
-        $stmt->bind_param('s', $targetName);
+        $stmt->bind_param('ss', $targetName, $authPassword);
         $stmt->execute();
         $actionId = $db->insert_id;
         $stmt->close();

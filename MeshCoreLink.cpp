@@ -1,6 +1,8 @@
 #include "MeshCoreLink.h"
 
 #include <chrono>
+#include <iomanip>
+#include <iostream>
 
 static bool startsWith(const std::string &s, const std::string &prefix)
 {
@@ -211,8 +213,15 @@ std::optional<std::vector<uint8_t>> MeshCoreLink::waitResponseMatching(
     const std::function<bool(const std::vector<uint8_t>&)> &matcher,
     int timeoutMs)
 {
-    if (!isRunning() || wantedCodes.empty())
+    if (!isRunning())
     {
+        std::cerr << "[link-wait] rejected: link not running\n";
+        return std::nullopt;
+    }
+
+    if (wantedCodes.empty())
+    {
+        std::cerr << "[link-wait] rejected: no wanted codes\n";
         return std::nullopt;
     }
 
@@ -220,6 +229,7 @@ std::optional<std::vector<uint8_t>> MeshCoreLink::waitResponseMatching(
 
     if (m_waiting)
     {
+        std::cerr << "[link-wait] rejected: another response waiter is already active\n";
         return std::nullopt;
     }
 
@@ -279,6 +289,38 @@ void MeshCoreLink::rxLoop()
         }
 
         uint8_t code = (*frame)[0];
+
+        // Low-level diagnostics for the repeater login path. This runs before
+        // request matching and before any user callback, so it also tells us
+        // whether the RX thread is stuck while dispatching an earlier frame.
+        if (code == 0x88)
+        {
+            std::cout << "[link-rx] code=0x88 len=" << frame->size() << "\n";
+        }
+        else if (code == 0x81 || code == 0x85 || code == 0x86)
+        {
+            std::cout
+                << "[link-rx] code=0x"
+                << std::hex
+                << std::setw(2)
+                << std::setfill('0')
+                << static_cast<unsigned>(code)
+                << std::dec
+                << " len="
+                << frame->size()
+                << " raw=";
+
+            for (uint8_t b : *frame)
+            {
+                std::cout
+                    << std::hex
+                    << std::setw(2)
+                    << std::setfill('0')
+                    << static_cast<unsigned>(b);
+            }
+
+            std::cout << std::dec << "\n";
+        }
 
         // Fulfill request/response waiters
         {

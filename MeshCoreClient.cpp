@@ -222,6 +222,11 @@ bool MeshCoreClient::connect(const std::string &port)
         return false;
     }
 
+    {
+        std::lock_guard<std::mutex> lock(m_authMutex);
+        m_authenticatedPeers.clear();
+    }
+
     m_running = true;
 
     // Link callback: internal handling first, then user callback
@@ -230,6 +235,7 @@ bool MeshCoreClient::connect(const std::string &port)
         onLinkFrame(code, payload);
     });
 
+    m_pushDispatchThread = std::thread(&MeshCoreClient::pushDispatchLoop, this);
     m_taskThread = std::thread(&MeshCoreClient::taskLoop, this);
 
     if (!doHandshake())
@@ -253,6 +259,7 @@ void MeshCoreClient::disconnect()
         }
         m_taskCv.notify_all();
         m_runCv.notify_all();
+        m_pushDispatchCv.notify_all();
 
         {
             std::lock_guard<std::mutex> lock(m_captureMutex);
@@ -261,15 +268,45 @@ void MeshCoreClient::disconnect()
         }
         m_captureCv.notify_all();
 
+        {
+            std::lock_guard<std::mutex> lock(m_loginMutex);
+            m_loginCapture.active = false;
+            m_loginCapture.ready = false;
+            m_loginCapture.frame.clear();
+        }
+        m_loginCv.notify_all();
+
+        {
+            std::lock_guard<std::mutex> lock(m_binaryMutex);
+            m_binaryCapture.active = false;
+            m_binaryCapture.frames.clear();
+        }
+        m_binaryCv.notify_all();
+
         if (m_taskThread.joinable())
         {
             m_taskThread.join();
+        }
+
+        if (m_pushDispatchThread.joinable())
+        {
+            m_pushDispatchThread.join();
+        }
+
+        {
+            std::lock_guard<std::mutex> lock(m_pushDispatchMutex);
+            m_pushDispatchQueue.clear();
         }
     }
 
     m_link.stop();
 
     m_selfPublicKey.reset();
+
+    {
+        std::lock_guard<std::mutex> lock(m_authMutex);
+        m_authenticatedPeers.clear();
+    }
 
     {
         std::lock_guard<std::mutex> lock(m_peerMutex);
@@ -292,6 +329,35 @@ void MeshCoreClient::setMessageCallback(MessageCallback cb)
 {
     std::lock_guard<std::mutex> lock(m_cbMutex);
     m_msgCb = std::move(cb);
+}
+
+void MeshCoreClient::pushDispatchLoop()
+{
+    while (true)
+    {
+        std::pair<uint8_t, std::vector<uint8_t>> item;
+
+        {
+            std::unique_lock<std::mutex> lock(m_pushDispatchMutex);
+            m_pushDispatchCv.wait(lock, [this]()
+            {
+                return !m_running.load() || !m_pushDispatchQueue.empty();
+            });
+
+            if (!m_running.load()) return;
+
+            item = std::move(m_pushDispatchQueue.front());
+            m_pushDispatchQueue.pop_front();
+        }
+
+        PushCallback cb;
+        {
+            std::lock_guard<std::mutex> lock(m_cbMutex);
+            cb = m_pushCb;
+        }
+
+        if (cb) cb(item.first, item.second);
+    }
 }
 
 void MeshCoreClient::runForever()
@@ -350,6 +416,13 @@ std::optional<std::vector<MeshCoreClient::Peer>> MeshCoreClient::listPeers(std::
         return std::nullopt;
     }
 
+    // CMD_GET_CONTACTS is a streamed transaction: CONTACTS_START is followed by
+    // zero or more CONTACT frames and finally END_OF_CONTACTS. Keep the API lock
+    // for the complete stream. Otherwise a second listPeers() or another command
+    // can interleave with the active iterator and both callers share/clear the
+    // same capture queue.
+    std::lock_guard<std::mutex> apiLock(m_apiMutex);
+
     // Enable capture of CONTACT/END frames coming via link callback
     {
         std::lock_guard<std::mutex> lock(m_captureMutex);
@@ -370,10 +443,7 @@ std::optional<std::vector<MeshCoreClient::Peer>> MeshCoreClient::listPeers(std::
     }
 
     std::optional<std::vector<uint8_t>> startResp;
-    {
-        std::lock_guard<std::mutex> apiLock(m_apiMutex);
-        startResp = m_link.requestResponse(cmd, MeshCoreProto::RESP_CODE_CONTACTS_START, 3000);
-    }
+    startResp = m_link.requestResponse(cmd, MeshCoreProto::RESP_CODE_CONTACTS_START, 3000);
     if (!startResp.has_value())
     {
         std::lock_guard<std::mutex> lock(m_captureMutex);
@@ -923,81 +993,51 @@ void MeshCoreClient::triggerMsgSync()
 
 void MeshCoreClient::syncAllMessagesOnce()
 {
-    std::lock_guard<std::mutex> apiLock(m_apiMutex);
+    static constexpr std::size_t MAX_MESSAGES_PER_PASS = 8;
+    std::size_t processed = 0;
 
-    while (m_running && isConnected())
+    while (m_running && isConnected() && processed < MAX_MESSAGES_PER_PASS)
     {
         std::vector<uint8_t> cmd = { MeshCoreProto::CMD_SYNC_NEXT_MESSAGE };
+        std::optional<std::vector<uint8_t>> resp;
 
-        auto resp = m_link.requestResponseAny(
-            cmd,
-            std::vector<uint8_t>
-            {
-                MeshCoreProto::RESP_CODE_CONTACT_MSG_RECV_V3,
-                MeshCoreProto::RESP_CODE_CONTACT_MSG_RECV,
-                MeshCoreProto::RESP_CODE_CHANNEL_MSG_RECV_V3,
-                MeshCoreProto::RESP_CODE_CHANNEL_MSG_RECV,
-                MeshCoreProto::RESP_CODE_NO_MORE_MESSAGES
-            },
-            800
-        );
-
-        if (!resp.has_value())
+        // Serialize only the actual Companion command. Decoding, DB/name
+        // resolution and the application callback must not hold m_apiMutex.
         {
-            //std::cout << "[MSGSYNC] no response\n";
-            return;
+            std::lock_guard<std::mutex> apiLock(m_apiMutex);
+            resp = m_link.requestResponseAny(
+                cmd,
+                std::vector<uint8_t>
+                {
+                    MeshCoreProto::RESP_CODE_CONTACT_MSG_RECV_V3,
+                    MeshCoreProto::RESP_CODE_CONTACT_MSG_RECV,
+                    MeshCoreProto::RESP_CODE_CHANNEL_MSG_RECV_V3,
+                    MeshCoreProto::RESP_CODE_CHANNEL_MSG_RECV,
+                    MeshCoreProto::RESP_CODE_NO_MORE_MESSAGES
+                },
+                800
+            );
         }
 
-        if (resp->empty())
-        {
-            //std::cout << "[MSGSYNC] empty response\n";
-            return;
-        }
+        if (!resp.has_value()) return;
+        if (resp->empty()) return;
 
         const uint8_t code = (*resp)[0];
-
-        /*std::cout << "[MSGSYNC] raw message frame\n";
-        std::cout << "  code             : 0x"
-                  << std::hex
-                  << std::setw(2)
-                  << std::setfill('0')
-                  << static_cast<unsigned>(code)
-                  << std::dec
-                  << " (" << RespCodeToString(code) << ")\n";
-        std::cout << "  frameLen         : " << resp->size() << "\n";
-        std::cout << "  frameHex         : " << BytesToHex(*resp) << "\n";
-        DumpFrameBytes(*resp);*/
-
-        if (code == MeshCoreProto::RESP_CODE_NO_MORE_MESSAGES)
-        {
-            //std::cout << "[MSGSYNC] no more messages\n";
-            return;
-        }
+        if (code == MeshCoreProto::RESP_CODE_NO_MORE_MESSAGES) return;
 
         auto msgOpt = decodeRxMessage(*resp);
-
         if (!msgOpt.has_value())
         {
             std::cout << "[MSGSYNC] decodeRxMessage failed\n";
+            processed++;
             continue;
         }
 
         RxMessage msg = *msgOpt;
-
-        //std::cout << "[MSGSYNC] decoded message summary\n";
-        //DumpDecodedMessage(msg);
-
         std::string fromName;
-        if (!msg.isChannel)
-        {
-            fromName = nameFromPrefix6(msg.senderPrefix6);
-        }
-        else
-        {
-            fromName = MeshDB::ResolveChannelDisplayName(msg.channelIdx);
-        }
 
-        //std::cout << "  resolvedFromName : [" << fromName << "]\n";
+        if (!msg.isChannel) fromName = nameFromPrefix6(msg.senderPrefix6);
+        else fromName = MeshDB::ResolveChannelDisplayName(msg.channelIdx);
 
         MessageCallback mcb;
         {
@@ -1005,14 +1045,13 @@ void MeshCoreClient::syncAllMessagesOnce()
             mcb = m_msgCb;
         }
 
-        if (!mcb)
-        {
-        }
-        else
-        {
-            mcb(msg, fromName);
-        }
+        if (mcb) mcb(msg, fromName);
+        processed++;
     }
+
+    // There may be more messages. Requeue instead of monopolizing the
+    // Companion API lock; GUI actions and radio requests get a chance first.
+    if (m_running && isConnected() && processed >= MAX_MESSAGES_PER_PASS) triggerMsgSync();
 }
 
 std::optional<MeshCoreClient::RxMessage> MeshCoreClient::decodeRxMessage(const std::vector<uint8_t> &frame)
@@ -1260,6 +1299,86 @@ std::optional<MeshCoreClient::RxMessage> MeshCoreClient::decodeRxMessage(const s
 }
 void MeshCoreClient::onLinkFrame(uint8_t code, const std::vector<uint8_t> &payload)
 {
+    // Binary responses are asynchronous pushes. Capture them independently of
+    // MeshCoreLink's single request waiter so a fast 0x8C cannot be lost in the
+    // small gap after RESP_CODE_SENT and before the caller starts waiting.
+    if (code == MeshCoreProto::PUSH_CODE_BINARY_RESPONSE)
+    {
+        bool captured = false;
+
+        {
+            std::lock_guard<std::mutex> lock(m_binaryMutex);
+
+            if (m_binaryCapture.active)
+            {
+                m_binaryCapture.frames.push_back(payload);
+                while (m_binaryCapture.frames.size() > 16) m_binaryCapture.frames.pop_front();
+                captured = true;
+            }
+        }
+
+        if (captured) m_binaryCv.notify_all();
+    }
+
+    if (code == MeshCoreProto::PUSH_CODE_PATH_UPDATED ||
+        code == MeshCoreProto::PUSH_CODE_LOGIN_SUCCESS ||
+        code == MeshCoreProto::PUSH_CODE_LOGIN_FAIL)
+    {
+        bool loginActive = false;
+
+        {
+            std::lock_guard<std::mutex> lock(m_loginMutex);
+            loginActive = m_loginCapture.active;
+        }
+
+        if (loginActive)
+        {
+            std::cout
+                << "[login-rx] code=0x"
+                << std::hex
+                << std::setw(2)
+                << std::setfill('0')
+                << static_cast<unsigned>(code)
+                << std::dec
+                << " len="
+                << payload.size()
+                << " raw="
+                << BytesToHex(payload)
+                << "\n";
+        }
+    }
+
+    // Synchronous repeater-login capture. A captured login frame is consumed here
+    // so the room-auth state machine does not interpret it as a room login.
+    if ((code == MeshCoreProto::PUSH_CODE_LOGIN_SUCCESS ||
+         code == MeshCoreProto::PUSH_CODE_LOGIN_FAIL) &&
+        payload.size() >= 8)
+    {
+        bool captured = false;
+
+        {
+            std::lock_guard<std::mutex> lock(m_loginMutex);
+
+            if (m_loginCapture.active &&
+                std::equal(
+                    m_loginCapture.prefix.begin(),
+                    m_loginCapture.prefix.end(),
+                    payload.begin() + 2))
+            {
+                m_loginCapture.frame = payload;
+                m_loginCapture.ready = true;
+                m_loginCapture.active = false;
+                captured = true;
+            }
+        }
+
+        if (captured)
+        {
+            m_loginCv.notify_all();
+            return;
+        }
+    }
+
     // 1a) contact-stream capture for listPeers()
     {
         std::lock_guard<std::mutex> lock(m_captureMutex);
@@ -1329,17 +1448,15 @@ void MeshCoreClient::onLinkFrame(uint8_t code, const std::vector<uint8_t> &paylo
         triggerMsgSync();
     }
 
-    // 4) user push callback
-    PushCallback cb;
+    // 4) User/application push processing is deliberately asynchronous.
+    // PushRouter writes to MariaDB and may block on MeshDB::s_mutex for seconds.
+    // Never let that stall the link RX thread, otherwise protocol responses
+    // (LOGIN_SUCCESS, binary responses, stats, ...) remain unread in the socket.
     {
-        std::lock_guard<std::mutex> lock(m_cbMutex);
-        cb = m_pushCb;
+        std::lock_guard<std::mutex> lock(m_pushDispatchMutex);
+        m_pushDispatchQueue.emplace_back(code, payload);
     }
-
-    if (cb)
-    {
-        cb(code, payload);
-    }
+    m_pushDispatchCv.notify_one();
 }
 
 uint32_t MeshCoreClient::Peer::nodeId() const
@@ -2003,18 +2120,300 @@ bool MeshCoreClient::syncClock()
 }
 
 
+bool MeshCoreClient::addOrUpdateContact(const Peer& peer)
+{
+    if (!isConnected()) return false;
+    if (peer.name.empty()) return false;
+
+    static constexpr uint8_t OUT_PATH_UNKNOWN = 0xFF;
+    static constexpr size_t MAX_PATH_SIZE = 64;
+    static constexpr size_t CONTACT_NAME_SIZE = 32;
+
+    std::vector<uint8_t> cmd;
+    cmd.reserve(1 + 32 + 1 + 1 + 1 + MAX_PATH_SIZE + CONTACT_NAME_SIZE + 4 + 8);
+
+    cmd.push_back(MeshCoreProto::CMD_ADD_UPDATE_CONTACT);
+    cmd.insert(cmd.end(), peer.publicKey.begin(), peer.publicKey.end());
+    cmd.push_back(peer.type);
+    cmd.push_back(peer.flags);
+    cmd.push_back(OUT_PATH_UNKNOWN);
+    cmd.insert(cmd.end(), MAX_PATH_SIZE, 0);
+
+    std::array<uint8_t, CONTACT_NAME_SIZE> nameField {};
+    const size_t nameLen = std::min(peer.name.size(), CONTACT_NAME_SIZE - 1);
+    std::memcpy(nameField.data(), peer.name.data(), nameLen);
+    cmd.insert(cmd.end(), nameField.begin(), nameField.end());
+
+    auto appendLe32 = [&cmd](uint32_t value)
+    {
+        cmd.push_back(static_cast<uint8_t>(value & 0xFF));
+        cmd.push_back(static_cast<uint8_t>((value >> 8) & 0xFF));
+        cmd.push_back(static_cast<uint8_t>((value >> 16) & 0xFF));
+        cmd.push_back(static_cast<uint8_t>((value >> 24) & 0xFF));
+    };
+
+    appendLe32(peer.lastAdvert);
+    appendLe32(static_cast<uint32_t>(peer.advLatE6));
+    appendLe32(static_cast<uint32_t>(peer.advLonE6));
+
+    std::optional<std::vector<uint8_t>> resp;
+
+    {
+        std::lock_guard<std::mutex> apiLock(m_apiMutex);
+        resp = m_link.requestResponseAny(
+            cmd,
+            std::vector<uint8_t>
+            {
+                MeshCoreProto::RESP_CODE_OK,
+                MeshCoreProto::RESP_CODE_ERR
+            },
+            3000);
+    }
+
+    if (!resp.has_value() || resp->empty()) return false;
+
+    if ((*resp)[0] == MeshCoreProto::RESP_CODE_ERR)
+    {
+        std::cerr << "[contacts] add/update failed for \""
+                  << peer.name
+                  << "\"";
+
+        if (resp->size() >= 2) std::cerr << " err=" << unsigned((*resp)[1]);
+        std::cerr << "\n";
+        return false;
+    }
+
+    std::cout << "[contacts] added/updated companion contact: \""
+              << peer.name
+              << "\" with unknown path (flood)\n";
+
+    return true;
+}
+
+bool MeshCoreClient::loginToPeerSync(const Peer& peer, const std::string& password)
+{
+    if (!isConnected()) return false;
+
+    std::string clipped = password;
+    if (clipped.size() > 15) clipped.resize(15);
+
+    const auto prefix = peer.prefix6();
+
+    {
+        std::lock_guard<std::mutex> lock(m_loginMutex);
+        if (m_loginCapture.active || m_loginCapture.ready) return false;
+
+        m_loginCapture.active = true;
+        m_loginCapture.ready = false;
+        m_loginCapture.prefix = prefix;
+        m_loginCapture.frame.clear();
+    }
+
+    auto cancelCapture = [this]()
+    {
+        std::lock_guard<std::mutex> lock(m_loginMutex);
+        m_loginCapture.active = false;
+        m_loginCapture.ready = false;
+        m_loginCapture.frame.clear();
+    };
+
+    std::vector<uint8_t> cmd;
+    cmd.reserve(1 + peer.publicKey.size() + clipped.size());
+    cmd.push_back(MeshCoreProto::CMD_SEND_LOGIN);
+    cmd.insert(cmd.end(), peer.publicKey.begin(), peer.publicKey.end());
+    cmd.insert(cmd.end(), clipped.begin(), clipped.end());
+
+    std::cout
+        << "[login] sending repeater login to "
+        << peer.name
+        << " passwordLen="
+        << clipped.size()
+        << std::endl;
+
+    std::optional<std::vector<uint8_t>> sentResp;
+    uint32_t waitMs = 15000;
+    std::vector<uint8_t> frame;
+
+    // Keep the companion API serialized for the whole login transaction.
+    // Companion firmware has only one pending login/request slot; another
+    // outgoing request can clear it before the RF response arrives.
+    std::unique_lock<std::mutex> apiLock(m_apiMutex);
+
+    sentResp = m_link.requestResponseAny(
+        cmd,
+        std::vector<uint8_t>
+        {
+            MeshCoreProto::RESP_CODE_SENT,
+            MeshCoreProto::RESP_CODE_ERR
+        },
+        5000);
+
+    if (!sentResp.has_value() || sentResp->empty())
+    {
+        apiLock.unlock();
+        cancelCapture();
+        std::cerr << "[login] companion did not accept login command\n";
+        return false;
+    }
+
+    if ((*sentResp)[0] == MeshCoreProto::RESP_CODE_ERR)
+    {
+        const unsigned err = sentResp->size() >= 2 ? (*sentResp)[1] : 0xFF;
+        apiLock.unlock();
+        cancelCapture();
+        std::cerr << "[login] companion rejected login command, err=" << err << "\n";
+        return false;
+    }
+
+    if (sentResp->size() >= 10)
+    {
+        const uint32_t suggested = MeshCoreProto::le32(sentResp->data() + 6);
+        waitMs = std::clamp<uint32_t>(suggested + 3000U, 15000U, 30000U);
+    }
+
+    if (sentResp->size() >= 6)
+    {
+        const uint32_t tag = MeshCoreProto::le32(sentResp->data() + 2);
+        std::cout
+            << "[login] queued tag=0x"
+            << std::hex
+            << std::setw(8)
+            << std::setfill('0')
+            << tag
+            << std::dec
+            << " waitMs="
+            << waitMs
+            << std::endl;
+    }
+
+    const auto waitStarted = std::chrono::steady_clock::now();
+
+    std::cout
+        << "[login] entering response wait clientRunning="
+        << (m_running.load() ? "yes" : "no")
+        << " linkRunning="
+        << (m_link.isRunning() ? "yes" : "no")
+        << std::endl;
+
+    {
+        std::unique_lock<std::mutex> loginLock(m_loginMutex);
+        const bool gotReply = m_loginCv.wait_for(
+            loginLock,
+            std::chrono::milliseconds(waitMs),
+            [this]()
+            {
+                return m_loginCapture.ready;
+            });
+
+        const auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - waitStarted).count();
+
+        std::cout
+            << "[login] response wait finished elapsedMs="
+            << elapsedMs
+            << " ready="
+            << (m_loginCapture.ready ? "yes" : "no")
+            << " clientRunning="
+            << (m_running.load() ? "yes" : "no")
+            << " linkRunning="
+            << (m_link.isRunning() ? "yes" : "no")
+            << std::endl;
+
+        if (!gotReply || !m_loginCapture.ready)
+        {
+            m_loginCapture.active = false;
+            m_loginCapture.ready = false;
+            m_loginCapture.frame.clear();
+            apiLock.unlock();
+            std::cerr << "[login] no login response from " << peer.name << "\n";
+            return false;
+        }
+
+        frame = std::move(m_loginCapture.frame);
+        m_loginCapture.active = false;
+        m_loginCapture.ready = false;
+    }
+
+    apiLock.unlock();
+
+    if (frame.empty()) return false;
+
+    if (frame[0] == MeshCoreProto::PUSH_CODE_LOGIN_FAIL)
+    {
+        std::cerr << "[login] login failed for " << peer.name << "\n";
+        return false;
+    }
+
+    if (frame[0] != MeshCoreProto::PUSH_CODE_LOGIN_SUCCESS || frame.size() < 8)
+    {
+        std::cerr << "[login] unexpected login response for " << peer.name << "\n";
+        return false;
+    }
+
+    const bool isAdmin = (frame[1] & 0x01) != 0;
+
+    std::cout
+        << "[login] success for "
+        << peer.name
+        << " admin="
+        << (isAdmin ? "yes" : "no");
+
+    if (frame.size() >= 13)
+    {
+        std::cout
+            << " acl_permissions=0x"
+            << std::hex
+            << std::setw(2)
+            << std::setfill('0')
+            << static_cast<unsigned>(frame[12])
+            << std::dec;
+    }
+
+    std::cout << "\n";
+
+    {
+        std::lock_guard<std::mutex> lock(m_authMutex);
+        m_authenticatedPeers.insert(prefix);
+    }
+
+    return true;
+}
+
 std::optional<std::string> MeshCoreClient::requestNeighboursRaw(const std::string& repeaterName)
 {
-    static constexpr uint8_t binaryReqTypeNeighbours = 0x00;
-    static constexpr uint8_t neighbourCount = 0xFF;
-    static constexpr uint32_t neighbourOffset = 0;
-    static constexpr uint8_t pubKeyPrefixLength = 0x04;
-
     if (repeaterName.empty())
     {
         std::cerr << "[neighbours] empty repeater name\n";
         return std::nullopt;
     }
+
+    auto peersOpt = listPeers(std::nullopt);
+    if (!peersOpt.has_value())
+    {
+        std::cerr << "[neighbours] could not fetch contacts\n";
+        return std::nullopt;
+    }
+
+    for (const auto& peer : *peersOpt)
+    {
+        if (peer.name == repeaterName) return requestNeighboursRaw(peer);
+    }
+
+    std::cerr << "[neighbours] repeater not found: " << repeaterName << "\n";
+    return std::nullopt;
+}
+
+std::optional<std::string> MeshCoreClient::requestNeighboursRaw(const Peer& repeater, const std::string& password)
+{
+    static constexpr uint8_t binaryReqTypeNeighbours = 0x00;
+    static constexpr uint8_t neighbourCount = 0xFF;
+    static constexpr uint8_t pubKeyPrefixLength = 0x04;
+    static constexpr size_t responseHeaderSize = 4;
+    static constexpr size_t neighbourRecordSize = 9;
+    static constexpr unsigned MAX_LOGIN_ATTEMPTS = 5;
+    static constexpr unsigned MAX_ATTEMPTS_PER_PAGE = 5;
+    static constexpr uint32_t LOGIN_RETRY_DELAY_MS = 500;
+    static constexpr uint32_t RETRY_DELAY_MS = 500;
 
     if (!isConnected())
     {
@@ -2022,81 +2421,172 @@ std::optional<std::string> MeshCoreClient::requestNeighboursRaw(const std::strin
         return std::nullopt;
     }
 
-    auto peersOpt = listPeers(std::nullopt);
+    const auto prefix = repeater.prefix6();
 
-    if (!peersOpt.has_value())
+    if (!password.empty())
     {
-        std::cerr << "[neighbours] could not fetch contacts\n";
-        return std::nullopt;
-    }
-
-    std::optional<Peer> repeater;
-
-    for (const auto& peer : *peersOpt)
-    {
-        if (peer.name == repeaterName)
+        bool authenticated = false;
         {
-            repeater = peer;
-            break;
+            std::lock_guard<std::mutex> lock(m_authMutex);
+            authenticated = m_authenticatedPeers.find(prefix) != m_authenticatedPeers.end();
+        }
+
+        if (!authenticated)
+        {
+            for (unsigned attempt = 1; attempt <= MAX_LOGIN_ATTEMPTS; ++attempt)
+            {
+                std::cout
+                    << "[login] attempt="
+                    << attempt
+                    << "/"
+                    << MAX_LOGIN_ATTEMPTS
+                    << " for "
+                    << repeater.name
+                    << std::endl;
+
+                if (loginToPeerSync(repeater, password))
+                {
+                    authenticated = true;
+                    break;
+                }
+
+                if (attempt < MAX_LOGIN_ATTEMPTS)
+                {
+                    std::cout
+                        << "[login] retrying "
+                        << repeater.name
+                        << " in "
+                        << LOGIN_RETRY_DELAY_MS
+                        << "ms"
+                        << std::endl;
+                    std::this_thread::sleep_for(std::chrono::milliseconds(LOGIN_RETRY_DELAY_MS));
+                }
+            }
+
+            if (!authenticated)
+            {
+                std::cerr
+                    << "[neighbours] repeater login failed after "
+                    << MAX_LOGIN_ATTEMPTS
+                    << " attempts: "
+                    << repeater.name
+                    << "\n";
+                return std::nullopt;
+            }
+        }
+        else
+        {
+            std::cout << "[login] already authenticated in this session, skipping login for "
+                      << repeater.name << std::endl;
         }
     }
 
-    if (!repeater.has_value())
+    const auto readLe16 = [](const uint8_t* p) -> uint16_t
     {
-        std::cerr << "[neighbours] repeater not found: " << repeaterName << "\n";
-        return std::nullopt;
-    }
+        return static_cast<uint16_t>(p[0]) |
+               (static_cast<uint16_t>(p[1]) << 8);
+    };
 
-    const uint32_t tag = static_cast<uint32_t>(
-        std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::steady_clock::now().time_since_epoch()).count());
-
-    std::vector<uint8_t> requestData;
-    requestData.reserve(10);
-    requestData.push_back(binaryReqTypeNeighbours);
-    requestData.push_back(neighbourCount);
-    requestData.push_back(static_cast<uint8_t>(neighbourOffset & 0xFF));
-    requestData.push_back(static_cast<uint8_t>((neighbourOffset >> 8) & 0xFF));
-    requestData.push_back(static_cast<uint8_t>((neighbourOffset >> 16) & 0xFF));
-    requestData.push_back(pubKeyPrefixLength);
-    requestData.push_back(static_cast<uint8_t>(tag & 0xFF));
-    requestData.push_back(static_cast<uint8_t>((tag >> 8) & 0xFF));
-    requestData.push_back(static_cast<uint8_t>((tag >> 16) & 0xFF));
-    requestData.push_back(static_cast<uint8_t>((tag >> 24) & 0xFF));
-
-    std::vector<uint8_t> cmd;
-    cmd.reserve(1 + repeater->publicKey.size() + 1 + requestData.size());
-    cmd.push_back(MeshCoreProto::CMD_SEND_RAW_DATA);
-    cmd.insert(cmd.end(), repeater->publicKey.begin(), repeater->publicKey.end());
-    cmd.push_back(0x06);
-    cmd.insert(cmd.end(), requestData.begin(), requestData.end());
-
-    std::cout
-        << "[neighbours] requesting direct neighbours from "
-        << repeaterName
-        << "\n"
-        << "[neighbours] binary request data: "
-        << BytesToHex(requestData)
-        << "\n"
-        << "[neighbours] companion raw command: "
-        << BytesToHex(cmd)
-        << "\n";
-
-    std::optional<std::vector<uint8_t>> sentResp;
-    std::optional<std::vector<uint8_t>> resp;
-    uint32_t responseTag = 0;
-
+    const auto readLe32Local = [](const uint8_t* p) -> uint32_t
     {
-        std::lock_guard<std::mutex> apiLock(m_apiMutex);
+        return static_cast<uint32_t>(p[0]) |
+               (static_cast<uint32_t>(p[1]) << 8) |
+               (static_cast<uint32_t>(p[2]) << 16) |
+               (static_cast<uint32_t>(p[3]) << 24);
+    };
 
-        sentResp = m_link.requestResponse(
-            cmd,
-            MeshCoreProto::RESP_CODE_SENT,
-            5000);
+    const auto apiWaitStart = std::chrono::steady_clock::now();
+    std::unique_lock<std::mutex> apiLock(m_apiMutex);
+    const auto apiWaitMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - apiWaitStart).count();
+    if (apiWaitMs > 50) std::cout << "[neighbours] waited " << apiWaitMs << "ms for companion API lock" << std::endl;
 
-        if (sentResp.has_value() && sentResp->size() >= 6)
+    std::vector<std::array<uint8_t, neighbourRecordSize>> mergedRecords;
+    uint32_t offset = 0;
+    uint16_t reportedTotal = 0;
+    unsigned pageNumber = 0;
+
+    while (pageNumber == 0 || offset < reportedTotal)
+    {
+        pageNumber++;
+        bool pageComplete = false;
+        uint16_t pageTotal = 0;
+        uint16_t pageResultCount = 0;
+        std::vector<uint8_t> pageData;
+
+        for (unsigned attempt = 1; attempt <= MAX_ATTEMPTS_PER_PAGE; attempt++)
         {
-            responseTag = MeshCoreProto::le32(sentResp->data() + 2);
+            const uint32_t randomBlob = static_cast<uint32_t>(
+                std::chrono::steady_clock::now().time_since_epoch().count());
+
+            std::vector<uint8_t> requestData;
+            requestData.reserve(10);
+            requestData.push_back(binaryReqTypeNeighbours);
+            requestData.push_back(neighbourCount);
+            requestData.push_back(static_cast<uint8_t>(offset & 0xFF));
+            requestData.push_back(static_cast<uint8_t>((offset >> 8) & 0xFF));
+            requestData.push_back(0x00); // order_by: newest -> oldest
+            requestData.push_back(pubKeyPrefixLength);
+            requestData.push_back(static_cast<uint8_t>(randomBlob & 0xFF));
+            requestData.push_back(static_cast<uint8_t>((randomBlob >> 8) & 0xFF));
+            requestData.push_back(static_cast<uint8_t>((randomBlob >> 16) & 0xFF));
+            requestData.push_back(static_cast<uint8_t>((randomBlob >> 24) & 0xFF));
+
+            std::vector<uint8_t> cmd;
+            cmd.reserve(1 + repeater.publicKey.size() + 1 + requestData.size());
+            cmd.push_back(MeshCoreProto::CMD_SEND_RAW_DATA);
+            cmd.insert(cmd.end(), repeater.publicKey.begin(), repeater.publicKey.end());
+            cmd.push_back(0x06); // REQ_TYPE_GET_NEIGHBOURS
+            cmd.insert(cmd.end(), requestData.begin(), requestData.end());
+
+            std::cout
+                << "[neighbours] requesting page=" << pageNumber
+                << " offset=" << offset
+                << " from " << repeater.name
+                << " attempt=" << attempt << "/" << MAX_ATTEMPTS_PER_PAGE
+                << "\n"
+                << "[neighbours] binary request data: "
+                << BytesToHex(requestData)
+                << "\n"
+                << "[neighbours] companion raw command: "
+                << BytesToHex(cmd)
+                << std::endl;
+
+            {
+                std::lock_guard<std::mutex> lock(m_binaryMutex);
+                m_binaryCapture.active = true;
+                m_binaryCapture.frames.clear();
+            }
+
+            auto cancelBinaryCapture = [this]()
+            {
+                std::lock_guard<std::mutex> lock(m_binaryMutex);
+                m_binaryCapture.active = false;
+                m_binaryCapture.frames.clear();
+            };
+
+            auto sentResp = m_link.requestResponse(
+                cmd,
+                MeshCoreProto::RESP_CODE_SENT,
+                5000);
+
+            if (!sentResp.has_value() || sentResp->size() < 6)
+            {
+                cancelBinaryCapture();
+                std::cerr << "[neighbours] no sent ack response page=" << pageNumber
+                          << " offset=" << offset
+                          << " attempt=" << attempt << "/" << MAX_ATTEMPTS_PER_PAGE
+                          << "\n";
+                if (attempt < MAX_ATTEMPTS_PER_PAGE) std::this_thread::sleep_for(std::chrono::milliseconds(RETRY_DELAY_MS));
+                continue;
+            }
+
+            const uint32_t responseTag = MeshCoreProto::le32(sentResp->data() + 2);
+            const bool sentFlood = sentResp->size() >= 2 && (*sentResp)[1] != 0;
+            const uint32_t suggestedMs = sentResp->size() >= 10
+                ? MeshCoreProto::le32(sentResp->data() + 6)
+                : 5000U;
+            const uint32_t waitMs = std::clamp<uint32_t>(suggestedMs + 3000U, 6000U, 15000U);
 
             std::cout
                 << "[neighbours] sent ack/tag: 0x"
@@ -2105,88 +2595,222 @@ std::optional<std::string> MeshCoreClient::requestNeighboursRaw(const std::strin
                 << std::setfill('0')
                 << responseTag
                 << std::dec
-                << "\n";
+                << " page=" << pageNumber
+                << " offset=" << offset
+                << " mode=" << (sentFlood ? "flood" : "direct")
+                << " suggestedMs=" << suggestedMs
+                << " waitMs=" << waitMs
+                << std::endl;
 
-            resp = m_link.waitResponseMatching(
-                std::vector<uint8_t> { MeshCoreProto::PUSH_CODE_BINARY_RESPONSE },
-                [responseTag](const std::vector<uint8_t>& frame)
+            std::optional<std::vector<uint8_t>> resp;
+            const auto responseWaitStarted = std::chrono::steady_clock::now();
+
+            {
+                std::unique_lock<std::mutex> lock(m_binaryMutex);
+
+                const auto findResponse = [this, responseTag]()
                 {
-                    if (frame.size() < 6)
-                    {
-                        return false;
-                    }
+                    return std::find_if(
+                        m_binaryCapture.frames.begin(),
+                        m_binaryCapture.frames.end(),
+                        [responseTag](const std::vector<uint8_t>& frame)
+                        {
+                            if (frame.size() < 6) return false;
+                            return MeshCoreProto::le32(frame.data() + 2) == responseTag;
+                        });
+                };
 
-                    return MeshCoreProto::le32(frame.data() + 2) == responseTag;
-                },
-                8000);
+                const bool got = m_binaryCv.wait_for(
+                    lock,
+                    std::chrono::milliseconds(waitMs),
+                    [&]()
+                    {
+                        return findResponse() != m_binaryCapture.frames.end() || !m_running.load();
+                    });
+
+                if (got)
+                {
+                    auto it = findResponse();
+                    if (it != m_binaryCapture.frames.end())
+                    {
+                        resp = std::move(*it);
+                        m_binaryCapture.frames.erase(it);
+                    }
+                }
+
+                m_binaryCapture.active = false;
+                m_binaryCapture.frames.clear();
+            }
+
+            const auto responseWaitMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - responseWaitStarted).count();
+
+            std::cout
+                << "[neighbours] binary response wait finished elapsedMs="
+                << responseWaitMs
+                << " got=" << (resp.has_value() ? "yes" : "no")
+                << " page=" << pageNumber
+                << " offset=" << offset
+                << std::endl;
+
+            if (!resp.has_value() || resp->size() < 6)
+            {
+                std::cerr << "[neighbours] no binary response for sent ack/tag 0x"
+                          << std::hex
+                          << std::setw(8)
+                          << std::setfill('0')
+                          << responseTag
+                          << std::dec
+                          << " page=" << pageNumber
+                          << " offset=" << offset
+                          << " attempt=" << attempt << "/" << MAX_ATTEMPTS_PER_PAGE
+                          << "\n";
+                if (attempt < MAX_ATTEMPTS_PER_PAGE) std::this_thread::sleep_for(std::chrono::milliseconds(RETRY_DELAY_MS));
+                continue;
+            }
+
+            pageData.assign(resp->begin() + 6, resp->end());
+
+            if (pageData.size() < responseHeaderSize)
+            {
+                std::cerr << "[neighbours] short page response page=" << pageNumber
+                          << " offset=" << offset
+                          << " attempt=" << attempt << "/" << MAX_ATTEMPTS_PER_PAGE
+                          << " bytes=" << pageData.size() << "\n";
+                if (attempt < MAX_ATTEMPTS_PER_PAGE) std::this_thread::sleep_for(std::chrono::milliseconds(RETRY_DELAY_MS));
+                continue;
+            }
+
+            pageTotal = readLe16(pageData.data());
+            pageResultCount = readLe16(pageData.data() + 2);
+            const size_t neededSize = responseHeaderSize +
+                                      static_cast<size_t>(pageResultCount) * neighbourRecordSize;
+
+            if (pageData.size() < neededSize)
+            {
+                std::cerr << "[neighbours] truncated page response page=" << pageNumber
+                          << " offset=" << offset
+                          << " total=" << pageTotal
+                          << " result_count=" << pageResultCount
+                          << " bytes=" << pageData.size()
+                          << " needed=" << neededSize
+                          << " attempt=" << attempt << "/" << MAX_ATTEMPTS_PER_PAGE
+                          << "\n";
+                if (attempt < MAX_ATTEMPTS_PER_PAGE) std::this_thread::sleep_for(std::chrono::milliseconds(RETRY_DELAY_MS));
+                continue;
+            }
+
+            if (pageResultCount == 0 && offset < pageTotal)
+            {
+                std::cerr << "[neighbours] empty page before end page=" << pageNumber
+                          << " offset=" << offset
+                          << " total=" << pageTotal
+                          << " attempt=" << attempt << "/" << MAX_ATTEMPTS_PER_PAGE
+                          << "\n";
+                if (attempt < MAX_ATTEMPTS_PER_PAGE) std::this_thread::sleep_for(std::chrono::milliseconds(RETRY_DELAY_MS));
+                continue;
+            }
+
+            std::cout
+                << "[neighbours] page received page=" << pageNumber
+                << " offset=" << offset
+                << " total=" << pageTotal
+                << " result_count=" << pageResultCount
+                << " attempt=" << attempt << "/" << MAX_ATTEMPTS_PER_PAGE
+                << std::endl;
+
+            pageComplete = true;
+            break;
+        }
+
+        if (!pageComplete)
+        {
+            std::cerr << "[neighbours] page failed after " << MAX_ATTEMPTS_PER_PAGE
+                      << " attempts page=" << pageNumber
+                      << " offset=" << offset << "\n";
+
+            if (!password.empty())
+            {
+                std::lock_guard<std::mutex> lock(m_authMutex);
+                m_authenticatedPeers.erase(prefix);
+            }
+
+            return std::nullopt;
+        }
+
+        if (pageTotal > reportedTotal) reportedTotal = pageTotal;
+
+        for (uint16_t i = 0; i < pageResultCount; i++)
+        {
+            const size_t pos = responseHeaderSize + static_cast<size_t>(i) * neighbourRecordSize;
+            std::array<uint8_t, neighbourRecordSize> record {};
+            std::copy_n(pageData.begin() + static_cast<std::ptrdiff_t>(pos), neighbourRecordSize, record.begin());
+
+            auto existing = std::find_if(
+                mergedRecords.begin(),
+                mergedRecords.end(),
+                [&record](const std::array<uint8_t, neighbourRecordSize>& candidate)
+                {
+                    return std::equal(record.begin(), record.begin() + 4, candidate.begin());
+                });
+
+            if (existing == mergedRecords.end())
+            {
+                mergedRecords.push_back(record);
+                continue;
+            }
+
+            const uint32_t oldSecsAgo = readLe32Local(existing->data() + 4);
+            const uint32_t newSecsAgo = readLe32Local(record.data() + 4);
+            if (newSecsAgo < oldSecsAgo) *existing = record;
+        }
+
+        std::cout
+            << "[neighbours] aggregate=" << mergedRecords.size()
+            << "/" << reportedTotal
+            << " after page=" << pageNumber
+            << std::endl;
+
+        if (pageResultCount == 0) break;
+        offset += pageResultCount;
+
+        if (offset > 0xFFFFU)
+        {
+            std::cerr << "[neighbours] offset exceeds protocol limit: " << offset << "\n";
+            return std::nullopt;
         }
     }
 
-    if (!sentResp.has_value() || sentResp->size() < 6)
+    std::vector<uint8_t> combined;
+    combined.reserve(responseHeaderSize + mergedRecords.size() * neighbourRecordSize);
+    combined.push_back(static_cast<uint8_t>(reportedTotal & 0xFF));
+    combined.push_back(static_cast<uint8_t>((reportedTotal >> 8) & 0xFF));
+
+    const uint16_t combinedCount = static_cast<uint16_t>(
+        std::min<size_t>(mergedRecords.size(), 0xFFFFU));
+    combined.push_back(static_cast<uint8_t>(combinedCount & 0xFF));
+    combined.push_back(static_cast<uint8_t>((combinedCount >> 8) & 0xFF));
+
+    for (const auto& record : mergedRecords)
     {
-        std::cerr << "[neighbours] no sent ack response\n";
-        return std::nullopt;
+        combined.insert(combined.end(), record.begin(), record.end());
     }
-
-    if (!resp.has_value() || resp->size() < 6)
-    {
-        std::cerr << "[neighbours] no binary response for sent ack/tag 0x"
-                  << std::hex
-                  << std::setw(8)
-                  << std::setfill('0')
-                  << responseTag
-                  << std::dec
-                  << "\n";
-        return std::nullopt;
-    }
-
-    const std::vector<uint8_t>& frame = *resp;
-
-    if (frame[0] != MeshCoreProto::PUSH_CODE_BINARY_RESPONSE)
-    {
-        std::cerr
-            << "[neighbours] unexpected response code: 0x"
-            << std::hex
-            << std::setw(2)
-            << std::setfill('0')
-            << static_cast<unsigned>(frame[0])
-            << std::dec
-            << "\n";
-
-        return std::nullopt;
-    }
-
-    const uint32_t frameTag = MeshCoreProto::le32(frame.data() + 2);
-
-    if (frameTag != responseTag)
-    {
-        std::cerr
-            << "[neighbours] binary response tag mismatch: expected ack/tag 0x"
-            << std::hex
-            << std::setw(8)
-            << std::setfill('0')
-            << responseTag
-            << ", got 0x"
-            << std::setw(8)
-            << frameTag
-            << std::dec
-            << "\n";
-
-        return std::nullopt;
-    }
-
-    std::vector<uint8_t> responseData(frame.begin() + 6, frame.end());
-    const std::string responseHex = BytesToHex(responseData);
 
     std::cout
-        << "[neighbours] binary response frame: "
-        << BytesToHex(frame)
-        << "\n"
-        << "[neighbours] binary response data: "
-        << responseHex
-        << "\n";
+        << "[neighbours] complete pages=" << pageNumber
+        << " total=" << reportedTotal
+        << " result_count=" << combinedCount
+        << " raw_bytes=" << combined.size()
+        << std::endl;
 
-    return responseHex;
+    if (combinedCount < reportedTotal)
+    {
+        std::cerr << "[neighbours] warning: collected " << combinedCount
+                  << " unique neighbours but repeater reported " << reportedTotal
+                  << "\n";
+    }
+
+    return BytesToHex(combined);
 }
 
 bool MeshCoreClient::resetPath(const std::array<uint8_t, 32>& publicKey)
@@ -2277,13 +2901,14 @@ std::optional<MeshCoreClient::RadioStats> MeshCoreClient::getRadioStats()
 
     {
         std::lock_guard<std::mutex> apiLock(m_apiMutex);
-        resp = m_link.requestResponseAny(
+        resp = m_link.requestResponseMatching(
             cmd,
-            std::vector<uint8_t>
+            std::vector<uint8_t> { MeshCoreProto::RESP_CODE_STATS_RADIO },
+            [](const std::vector<uint8_t>& frame)
             {
-                MeshCoreProto::RESP_CODE_STATS_RADIO
+                return frame.size() >= 2 && frame[1] == 0x01;
             },
-            3000
+            1000
         );
     }
 
@@ -2341,13 +2966,14 @@ std::optional<MeshCoreClient::CoreStats> MeshCoreClient::getCoreStats()
 
     {
         std::lock_guard<std::mutex> apiLock(m_apiMutex);
-        resp = m_link.requestResponseAny(
+        resp = m_link.requestResponseMatching(
             cmd,
-            std::vector<uint8_t>
+            std::vector<uint8_t> { MeshCoreProto::RESP_CODE_STATS_RADIO },
+            [](const std::vector<uint8_t>& frame)
             {
-                MeshCoreProto::RESP_CODE_STATS_RADIO
+                return frame.size() >= 2 && frame[1] == 0x00;
             },
-            3000
+            1000
         );
     }
 

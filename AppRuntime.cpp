@@ -9,11 +9,13 @@
 #include <algorithm>
 #include <cctype>
 #include <map>
+#include <cmath>
 #include <openssl/sha.h>
 
 static constexpr unsigned DISCOVER_COOLDOWN_SECONDS = 5;
 static constexpr unsigned RADIO_STATUS_POLL_SECONDS = 20;
 static constexpr unsigned RF_RATE_PRINT_SECONDS = 60;
+static constexpr uint32_t MAX_NEIGHBOUR_DISTANCE_METERS = 400000;
 
 static std::string JsonEscapeLocal(const std::string& value)
 {
@@ -133,6 +135,133 @@ static bool ParseHex32Local(const std::string& hex, std::array<uint8_t, 32>& out
         }
 
         out[i] = static_cast<uint8_t>((hi << 4) | lo);
+    }
+
+    return true;
+}
+
+struct NeighbourResultRecord
+{
+    std::string pubkeyPrefix8;
+    uint32_t heardAgoSeconds = 0;
+    int8_t snrQuarterDb = 0;
+};
+
+static std::string PubkeyPrefix8Local(const std::array<uint8_t, 32>& publicKey)
+{
+    static const char* hexChars = "0123456789ABCDEF";
+    std::string out;
+    out.reserve(8);
+
+    for (size_t i = 0; i < 4; i++)
+    {
+        const uint8_t b = publicKey[i];
+        out.push_back(hexChars[(b >> 4) & 0x0F]);
+        out.push_back(hexChars[b & 0x0F]);
+    }
+
+    return out;
+}
+
+static uint32_t HaversineDistanceMeters(
+    int32_t lat1E6,
+    int32_t lon1E6,
+    int32_t lat2E6,
+    int32_t lon2E6)
+{
+    constexpr double earthRadiusMeters = 6371000.0;
+    constexpr double pi = 3.14159265358979323846;
+    constexpr double degToRad = pi / 180.0;
+
+    const double lat1 = (static_cast<double>(lat1E6) / 1000000.0) * degToRad;
+    const double lon1 = (static_cast<double>(lon1E6) / 1000000.0) * degToRad;
+    const double lat2 = (static_cast<double>(lat2E6) / 1000000.0) * degToRad;
+    const double lon2 = (static_cast<double>(lon2E6) / 1000000.0) * degToRad;
+
+    const double dLat = lat2 - lat1;
+    const double dLon = lon2 - lon1;
+    const double sinLat = std::sin(dLat / 2.0);
+    const double sinLon = std::sin(dLon / 2.0);
+    const double a =
+        (sinLat * sinLat)
+        + (std::cos(lat1) * std::cos(lat2) * sinLon * sinLon);
+    const double c = 2.0 * std::atan2(std::sqrt(a), std::sqrt(std::max(0.0, 1.0 - a)));
+    const double distance = earthRadiusMeters * c;
+
+    return static_cast<uint32_t>(std::llround(std::max(0.0, distance)));
+}
+
+static bool ParseNeighbourResultPayload(
+    const std::string& rawHex,
+    uint16_t& totalCount,
+    std::vector<NeighbourResultRecord>& records)
+{
+    totalCount = 0;
+    records.clear();
+
+    if (rawHex.size() < 8 || (rawHex.size() % 2) != 0)
+    {
+        return false;
+    }
+
+    std::vector<uint8_t> bytes;
+    bytes.reserve(rawHex.size() / 2);
+
+    for (size_t i = 0; i < rawHex.size(); i += 2)
+    {
+        const int hi = HexNibble(rawHex[i]);
+        const int lo = HexNibble(rawHex[i + 1]);
+
+        if (hi < 0 || lo < 0)
+        {
+            return false;
+        }
+
+        bytes.push_back(static_cast<uint8_t>((hi << 4) | lo));
+    }
+
+    if (bytes.size() < 4)
+    {
+        return false;
+    }
+
+    totalCount = static_cast<uint16_t>(bytes[0])
+        | (static_cast<uint16_t>(bytes[1]) << 8);
+
+    const uint16_t resultCount = static_cast<uint16_t>(bytes[2])
+        | (static_cast<uint16_t>(bytes[3]) << 8);
+
+    constexpr size_t recordSize = 9;
+    const size_t requiredSize = 4 + (static_cast<size_t>(resultCount) * recordSize);
+
+    if (bytes.size() < requiredSize)
+    {
+        return false;
+    }
+
+    static const char* hexChars = "0123456789ABCDEF";
+    records.reserve(resultCount);
+    size_t pos = 4;
+
+    for (uint16_t i = 0; i < resultCount; i++, pos += recordSize)
+    {
+        NeighbourResultRecord record;
+        record.pubkeyPrefix8.reserve(8);
+
+        for (size_t j = 0; j < 4; j++)
+        {
+            const uint8_t b = bytes[pos + j];
+            record.pubkeyPrefix8.push_back(hexChars[(b >> 4) & 0x0F]);
+            record.pubkeyPrefix8.push_back(hexChars[b & 0x0F]);
+        }
+
+        record.heardAgoSeconds =
+            static_cast<uint32_t>(bytes[pos + 4])
+            | (static_cast<uint32_t>(bytes[pos + 5]) << 8)
+            | (static_cast<uint32_t>(bytes[pos + 6]) << 16)
+            | (static_cast<uint32_t>(bytes[pos + 7]) << 24);
+        record.snrQuarterDb = static_cast<int8_t>(bytes[pos + 8]);
+        records.push_back(std::move(record));
     }
 
     return true;
@@ -277,8 +406,8 @@ void AppRuntime::Tick()
     ProcessHourlyNodesResync();
     
     PrintRfRxRateIfDue();
-    PollRadioStatus();
     ProcessCompanionActions();
+    PollRadioStatus();
     ProcessOutgoingQueue();
     ProcessDiscoverQueue();
     ProcessAckTimeouts();
@@ -1901,7 +2030,65 @@ bool AppRuntime::ProcessSingleCompanionAction(const MeshDB::CompanionAction& act
             return false;
         }
 
-        auto rawHex = m_client.requestNeighboursRaw(action.targetName);
+        auto peers = m_client.listPeers(std::nullopt);
+
+        if (!peers.has_value())
+        {
+            MeshDB::MarkCompanionActionFailed(action.id, "could not fetch companion contacts");
+            return false;
+        }
+
+        const auto found = std::find_if(
+            peers->begin(),
+            peers->end(),
+            [&action](const MeshCoreClient::Peer& peer)
+            {
+                return peer.name == action.targetName;
+            });
+
+        MeshCoreClient::Peer targetPeer {};
+
+        if (found != peers->end())
+        {
+            targetPeer = *found;
+        }
+        else
+        {
+            auto dbRepeater = MeshDB::FindRepeaterContactByName(action.targetName);
+
+            if (!dbRepeater.has_value())
+            {
+                MeshDB::MarkCompanionActionFailed(action.id, "repeater not found in companion or database");
+                return false;
+            }
+
+            if (!ParseHex32Local(dbRepeater->publicKeyHex, targetPeer.publicKey))
+            {
+                MeshDB::MarkCompanionActionFailed(action.id, "invalid repeater public key in database");
+                return false;
+            }
+
+            targetPeer.name = dbRepeater->name;
+            targetPeer.type = dbRepeater->advertType;
+            targetPeer.flags = dbRepeater->contactFlags;
+            targetPeer.lastAdvert = dbRepeater->lastAdvertEpoch;
+            targetPeer.advLatE6 = dbRepeater->advLatE6;
+            targetPeer.advLonE6 = dbRepeater->advLonE6;
+
+            std::cout << "[neighbours] repeater missing in companion, restoring from DB: "
+                      << targetPeer.name
+                      << "\n";
+
+            if (!m_client.addOrUpdateContact(targetPeer))
+            {
+                MeshDB::MarkCompanionActionFailed(action.id, "could not restore repeater contact from database");
+                return false;
+            }
+        }
+
+        // We already resolved the target contact above. Do not call listPeers()
+        // a second time inside requestNeighboursRaw().
+        auto rawHex = m_client.requestNeighboursRaw(targetPeer, action.authPassword);
 
         if (!rawHex.has_value())
         {
@@ -1909,12 +2096,202 @@ bool AppRuntime::ProcessSingleCompanionAction(const MeshDB::CompanionAction& act
             return false;
         }
 
+        uint16_t totalCount = 0;
+        std::vector<NeighbourResultRecord> neighbourRecords;
+
+        if (!ParseNeighbourResultPayload(*rawHex, totalCount, neighbourRecords))
+        {
+            MeshDB::MarkCompanionActionFailed(action.id, "invalid neighbours payload");
+            return false;
+        }
+
+        const std::string homeRepeaterPrefix8 = PubkeyPrefix8Local(targetPeer.publicKey);
+        std::vector<std::string> coordinatePrefixes;
+        coordinatePrefixes.reserve(neighbourRecords.size() + 1);
+        coordinatePrefixes.push_back(homeRepeaterPrefix8);
+
+        for (const auto& record : neighbourRecords)
+        {
+            coordinatePrefixes.push_back(record.pubkeyPrefix8);
+        }
+
+        const auto coordinateRecords =
+            MeshDB::FindRepeaterCoordinatesByPubkeyPrefixes(coordinatePrefixes);
+
+        std::map<std::string, MeshDB::RepeaterCoordinateRecord> coordinatesByPrefix;
+
+        for (const auto& coordinate : coordinateRecords)
+        {
+            // Query result is newest first; keep the first row if an 8-char
+            // prefix should ever occur more than once in the database.
+            coordinatesByPrefix.emplace(coordinate.pubkeyPrefix8, coordinate);
+        }
+
+        const auto homeCoordinateIt = coordinatesByPrefix.find(homeRepeaterPrefix8);
+        const bool homeCoordinatesAvailable =
+            homeCoordinateIt != coordinatesByPrefix.end()
+            && homeCoordinateIt->second.advLatE6.has_value()
+            && homeCoordinateIt->second.advLonE6.has_value();
+
+        if (!homeCoordinatesAvailable)
+        {
+            std::cout
+                << "[neighbours] home repeater coordinates missing in repeaternodes prefix="
+                << homeRepeaterPrefix8
+                << "; distance_m will be null\n";
+        }
+
+        size_t matchedCoordinates = 0;
+        size_t calculatedDistances = 0;
+        size_t filteredImplausibleCoordinates = 0;
         std::ostringstream resultJson;
         resultJson
             << "{"
             << "\"repeater_name\":\"" << JsonEscapeLocal(action.targetName) << "\","
-            << "\"raw_hex\":\"" << JsonEscapeLocal(*rawHex) << "\""
-            << "}";
+            << "\"raw_hex\":\"" << JsonEscapeLocal(*rawHex) << "\","
+            << "\"total_count\":" << totalCount << ","
+            << "\"result_count\":" << neighbourRecords.size() << ","
+            << "\"home\":{" 
+            << "\"pubkey_prefix8\":\"" << homeRepeaterPrefix8 << "\","
+            << "\"name\":\"" << JsonEscapeLocal(action.targetName) << "\","
+            << "\"lat_e6\":";
+
+        if (homeCoordinatesAvailable)
+        {
+            resultJson << *homeCoordinateIt->second.advLatE6;
+        }
+        else
+        {
+            resultJson << "null";
+        }
+
+        resultJson << ",\"lon_e6\":";
+
+        if (homeCoordinatesAvailable)
+        {
+            resultJson << *homeCoordinateIt->second.advLonE6;
+        }
+        else
+        {
+            resultJson << "null";
+        }
+
+        resultJson << "},\"neighbours\":[";
+
+        for (size_t i = 0; i < neighbourRecords.size(); i++)
+        {
+            const auto& record = neighbourRecords[i];
+            const auto coordinateIt = coordinatesByPrefix.find(record.pubkeyPrefix8);
+
+            if (i != 0)
+            {
+                resultJson << ",";
+            }
+
+            const bool neighbourCoordinatesAvailable =
+                coordinateIt != coordinatesByPrefix.end()
+                && coordinateIt->second.advLatE6.has_value()
+                && coordinateIt->second.advLonE6.has_value();
+
+            if (neighbourCoordinatesAvailable)
+            {
+                matchedCoordinates++;
+            }
+
+            bool coordinatesUsable = neighbourCoordinatesAvailable;
+            bool distanceAvailable = false;
+            uint32_t distanceMeters = 0;
+
+            if (homeCoordinatesAvailable && neighbourCoordinatesAvailable)
+            {
+                distanceMeters = HaversineDistanceMeters(
+                    *homeCoordinateIt->second.advLatE6,
+                    *homeCoordinateIt->second.advLonE6,
+                    *coordinateIt->second.advLatE6,
+                    *coordinateIt->second.advLonE6);
+
+                if (distanceMeters > MAX_NEIGHBOUR_DISTANCE_METERS)
+                {
+                    coordinatesUsable = false;
+                    filteredImplausibleCoordinates++;
+
+                    std::cout
+                        << "[neighbours] dropping implausible coordinates prefix="
+                        << record.pubkeyPrefix8
+                        << " distance_m="
+                        << distanceMeters
+                        << " limit_m="
+                        << MAX_NEIGHBOUR_DISTANCE_METERS
+                        << "\n";
+                }
+                else
+                {
+                    distanceAvailable = true;
+                    calculatedDistances++;
+                }
+            }
+
+            resultJson
+                << "{"
+                << "\"pubkey_prefix8\":\"" << record.pubkeyPrefix8 << "\","
+                << "\"heard_ago_seconds\":" << record.heardAgoSeconds << ","
+                << "\"snr_db\":"
+                << (static_cast<double>(record.snrQuarterDb) / 4.0)
+                << ",\"lat_e6\":";
+
+            if (coordinatesUsable)
+            {
+                resultJson << *coordinateIt->second.advLatE6;
+            }
+            else
+            {
+                resultJson << "null";
+            }
+
+            resultJson << ",\"lon_e6\":";
+
+            if (coordinatesUsable)
+            {
+                resultJson << *coordinateIt->second.advLonE6;
+            }
+            else
+            {
+                resultJson << "null";
+            }
+
+            resultJson << ",\"distance_m\":";
+
+            if (distanceAvailable)
+            {
+                resultJson << distanceMeters;
+            }
+            else
+            {
+                resultJson << "null";
+            }
+
+            resultJson << "}";
+        }
+
+        resultJson << "]}";
+
+        std::cout
+            << "[neighbours] coordinates matched="
+            << matchedCoordinates
+            << "/"
+            << neighbourRecords.size()
+            << " from repeaternodes; distances calculated="
+            << calculatedDistances
+            << "/"
+            << neighbourRecords.size()
+            << " home_prefix="
+            << homeRepeaterPrefix8
+            << "; implausible coordinates filtered="
+            << filteredImplausibleCoordinates
+            << " (limit="
+            << (MAX_NEIGHBOUR_DISTANCE_METERS / 1000)
+            << "km)"
+            << "\n";
 
         if (!MeshDB::SetCompanionActionResult(action.id, resultJson.str()))
         {
